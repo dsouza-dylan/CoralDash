@@ -8,3 +8,4 @@ requests
 seaborn 
 matplotlib 
 scikit-learn
+statsmodels
