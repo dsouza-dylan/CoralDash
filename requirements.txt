@@ -3,7 +3,8 @@ pandas
 numpy 
 plotly 
 folium 
-streamlit-folium requests 
+streamlit-folium 
+requests 
 seaborn 
 matplotlib 
 scikit-learn
