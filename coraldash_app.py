@@ -1,293 +1,464 @@
-# CoralDash MegaApp - The Ultimate Coral Reef Monitoring & AI Platform
-
 import streamlit as st
 import pandas as pd
 import numpy as np
-import datetime
-import asyncio
 import plotly.express as px
 import plotly.graph_objects as go
-import folium
-from streamlit_folium import st_folium
-import altair as alt
-import shap
-import io
+from plotly.subplots import make_subplots
+import datetime
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import train_test_split
-import pydeck as pdk
+import seaborn as sns
 
-# ---- 1. Data Generation & API Simulation ----
+# Professional styling
+st.set_page_config(
+    page_title="CoralDash Pro",
+    page_icon="🪸",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-@st.cache_data(ttl=300)
-def generate_multimodal_data():
-    reefs = ['Reef_X', 'Reef_Y', 'Reef_Z']
-    latlon = [(21.3,-157.8), (20.9,-157.5), (21.5,-157.9)]
-    dates = pd.date_range('2022-01-01', '2025-06-01', freq='D')
-    records = []
-    for i, reef in enumerate(reefs):
-        lat, lon = latlon[i]
-        for d in dates:
-            day = d.timetuple().tm_yday
-            temp = 25 + 6*np.sin(day/365*2*np.pi) + np.random.normal(0,0.3)
-            ph = 8.1 - 0.02*np.cos(day/365*2*np.pi) + np.random.normal(0,0.015)
-            turbidity = max(0.1, np.random.normal(1,0.4))
-            satellite_ndvi = np.clip(0.5 + 0.3*np.sin(day/365*4*np.pi) + np.random.normal(0,0.05),0,1)
-            bleaching_index = max(0, (temp - 28) * 15 + np.random.normal(0,4))
-            coral_cover = np.clip(100 - bleaching_index*1.6 + np.random.normal(0,6),0,100)
-            records.append([reef, lat, lon, d, temp, ph, turbidity, satellite_ndvi, bleaching_index, coral_cover])
-    return pd.DataFrame(records, columns=[
-        'Reef','Latitude','Longitude','Date','Sea_Temperature','pH','Turbidity_NTU',
-        'Satellite_NDVI','Bleaching_Index','Coral_Cover'])
+# Custom CSS for professional styling
+st.markdown("""
+<style>
+    .main-header {
+        background: linear-gradient(90deg, #1e3a8a 0%, #3b82f6 50%, #06b6d4 100%);
+        padding: 2rem;
+        border-radius: 10px;
+        color: white;
+        text-align: center;
+        margin-bottom: 2rem;
+    }
+    .metric-card {
+        background: white;
+        padding: 1rem;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        border-left: 4px solid #3b82f6;
+    }
+    .alert-critical {
+        background: #fee2e2;
+        border: 1px solid #fca5a5;
+        border-radius: 8px;
+        padding: 1rem;
+        margin: 1rem 0;
+    }
+    .alert-warning {
+        background: #fef3c7;
+        border: 1px solid #fcd34d;
+        border-radius: 8px;
+        padding: 1rem;
+        margin: 1rem 0;
+    }
+    .status-healthy { color: #10b981; font-weight: bold; }
+    .status-warning { color: #f59e0b; font-weight: bold; }
+    .status-critical { color: #ef4444; font-weight: bold; }
+</style>
+""", unsafe_allow_html=True)
 
-# Simulated live sensor API returning random noise with trending signal
-async def async_sensor_api(reef_name):
-    base_temp = {'Reef_X': 27, 'Reef_Y': 26, 'Reef_Z': 28}[reef_name]
-    base_ph = 8.1
-    while True:
-        temp = base_temp + np.random.normal(0, 0.5)
-        ph = base_ph - np.random.normal(0, 0.02)
-        turbidity = np.clip(np.random.normal(1, 0.3), 0.1, 3)
-        yield {'temp': temp, 'ph': ph, 'turbidity': turbidity, 'timestamp': datetime.datetime.now()}
-        await asyncio.sleep(2)
+# Header
+st.markdown("""
+<div class="main-header">
+    <h1>🪸 CoralDash Pro</h1>
+    <p>Advanced Coral Reef Health Monitoring & Predictive Analytics Platform</p>
+</div>
+""", unsafe_allow_html=True)
 
-# ---- 2. Train ML Model with SHAP ----
+# Generate realistic coral reef data
+@st.cache_data
+def load_coral_data():
+    np.random.seed(42)
+    reefs = [
+        {"name": "Great Barrier Reef - North", "lat": -16.2839, "lon": 145.7781},
+        {"name": "Great Barrier Reef - Central", "lat": -20.3444, "lon": 149.0969},
+        {"name": "Coral Triangle - Palawan", "lat": 9.8349, "lon": 118.7384},
+        {"name": "Red Sea - Eilat", "lat": 29.5581, "lon": 34.9482},
+        {"name": "Caribbean - Bonaire", "lat": 12.1696, "lon": -68.2900},
+        {"name": "Maldives - North Malé", "lat": 4.1755, "lon": 73.5093}
+    ]
 
-def train_ml_model(df):
-    df_ml = df.copy()
-    df_ml['DayOfYear'] = df_ml['Date'].dt.dayofyear
-    features = ['Sea_Temperature', 'pH', 'Turbidity_NTU', 'Satellite_NDVI', 'DayOfYear']
-    X = df_ml[features]
-    y = df_ml['Coral_Cover']
-    X_train, X_test, y_train, y_test = train_test_split(X,y,test_size=0.15,random_state=42)
-    pipe = Pipeline([('scaler',StandardScaler()),('rf',RandomForestRegressor(n_estimators=300,random_state=42))])
-    pipe.fit(X_train,y_train)
-    score = pipe.score(X_test,y_test)
-    return pipe, score, X_test
+    dates = pd.date_range('2023-01-01', '2024-12-31', freq='D')
+    data = []
 
-@st.cache_resource
-def create_shap_explainer(model, X_sample):
-    explainer = shap.TreeExplainer(model.named_steps['rf'])
-    shap_values = explainer.shap_values(X_sample)
-    return explainer, shap_values
+    for reef in reefs:
+        base_temp = np.random.uniform(26, 29)
+        base_ph = np.random.uniform(7.9, 8.2)
 
-# ---- 3. Deep Learning Coral Species Classifier (Mock) ----
-# In reality, load a pre-trained model (e.g. EfficientNet, ResNet on coral images)
-def mock_coral_classifier(image_bytes):
-    # Random species & bleaching severity
-    species = ['Acropora', 'Montipora', 'Porites', 'Fungia']
-    severity = ['Healthy', 'Mild Bleaching', 'Severe Bleaching']
-    np.random.seed(sum(image_bytes) % 1000)
-    pred_species = np.random.choice(species)
-    pred_severity = np.random.choice(severity, p=[0.6, 0.3, 0.1])
-    confidence = np.random.uniform(0.75, 0.99)
-    return pred_species, pred_severity, confidence
+        for i, date in enumerate(dates):
+            # Seasonal patterns
+            seasonal_temp = base_temp + 2 * np.sin(2 * np.pi * i / 365) + np.random.normal(0, 0.5)
+            seasonal_ph = base_ph + 0.1 * np.cos(2 * np.pi * i / 365) + np.random.normal(0, 0.02)
 
-# ---- 4. Probabilistic Forecasting with Uncertainty (Mock Bayesian) ----
-def coral_cover_forecast_with_uncertainty(temp, ph, turbidity, ndvi, day_of_year):
-    base_pred = 90 - (temp - 27)*10 - (8.1 - ph)*15 + np.random.normal(0,3)
-    uncertainty = np.clip(np.random.normal(5, 2), 2, 10)
-    lower = max(0, base_pred - 1.96*uncertainty)
-    upper = min(100, base_pred + 1.96*uncertainty)
-    mean = np.clip(base_pred, 0, 100)
-    return mean, lower, upper
+            # Coral health based on temperature stress
+            temp_stress = max(0, seasonal_temp - 29)
+            coral_cover = max(20, 85 - temp_stress * 15 + np.random.normal(0, 5))
 
-# ---- 5. ENSO Phases & Anomaly Detection ----
-def get_enso_phase(date):
-    # Simplified repeating ENSO cycle mock (El Nino, Neutral, La Nina)
-    year = date.year
-    phases = ['El Niño', 'Neutral', 'La Niña']
-    return phases[year % 3]
+            # Other parameters
+            turbidity = np.clip(np.random.lognormal(0, 0.5), 0.1, 10)
+            salinity = np.random.normal(35, 0.5)
+            dissolved_oxygen = np.random.normal(8, 0.5)
 
-def detect_anomalies(df):
-    anomalies = df[(df['pH'] < 7.85) | (df['Sea_Temperature'] > 30)]
-    return anomalies[['Reef','Date','Sea_Temperature','pH']]
+            # Bleaching events (temperature > 30°C)
+            bleaching_severity = 0
+            if seasonal_temp > 30:
+                bleaching_severity = min(100, (seasonal_temp - 30) * 25)
 
-# ---- 6. App UI & Logic ----
+            data.append({
+                'reef_name': reef['name'],
+                'latitude': reef['lat'],
+                'longitude': reef['lon'],
+                'date': date,
+                'temperature': seasonal_temp,
+                'ph': seasonal_ph,
+                'coral_cover': coral_cover,
+                'turbidity': turbidity,
+                'salinity': salinity,
+                'dissolved_oxygen': dissolved_oxygen,
+                'bleaching_severity': bleaching_severity
+            })
 
-st.set_page_config(page_title="CoralDash MegaApp", layout="wide", page_icon="🪸")
-st.title("🪸 CoralDash MEGA - Ultimate Coral Reef Monitoring & AI Platform")
+    return pd.DataFrame(data)
 
-# Tabs for UI organization
-tabs = st.tabs(["Dashboard", "AI Prediction & Explainability", "Coral Species Classifier", "3D Reef Visualization", "Anomaly Alerts & ENSO", "Collaboration & Export"])
+# Load data
+df = load_coral_data()
 
-df = generate_multimodal_data()
-model, model_score, X_test = train_ml_model(df)
-explainer, shap_values = create_shap_explainer(model, X_test)
+# Sidebar controls
+st.sidebar.header("🎛️ Control Panel")
 
-with tabs[0]:
-    st.header("🌊 Interactive Reef Dashboard")
+# Reef selection
+selected_reefs = st.sidebar.multiselect(
+    "Select Reef Sites",
+    options=df['reef_name'].unique(),
+    default=df['reef_name'].unique()[:3]
+)
 
-    reefs = df['Reef'].unique()
-    selected_reefs = st.multiselect("Select Reef(s)", reefs, default=list(reefs))
-    date_min, date_max = df['Date'].min(), df['Date'].max()
-    date_range = st.date_input("Select Date Range", [date_min, date_max], min_value=date_min, max_value=date_max)
+# Date range
+date_range = st.sidebar.date_input(
+    "Date Range",
+    value=[df['date'].min().date(), df['date'].max().date()],
+    min_value=df['date'].min().date(),
+    max_value=df['date'].max().date()
+)
 
-    filtered_df = df[(df['Reef'].isin(selected_reefs)) & (df['Date'] >= pd.to_datetime(date_range[0])) & (df['Date'] <= pd.to_datetime(date_range[1]))]
+# Filter data
+filtered_df = df[
+    (df['reef_name'].isin(selected_reefs)) &
+    (df['date'] >= pd.to_datetime(date_range[0])) &
+    (df['date'] <= pd.to_datetime(date_range[1]))
+]
 
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Avg Sea Temp (°C)", f"{filtered_df['Sea_Temperature'].mean():.2f}")
-    col2.metric("Avg pH", f"{filtered_df['pH'].mean():.2f}")
-    col3.metric("Avg Turbidity (NTU)", f"{filtered_df['Turbidity_NTU'].mean():.2f}")
-    col4.metric("Avg Coral Cover (%)", f"{filtered_df['Coral_Cover'].mean():.2f}")
+# Health status function
+def get_health_status(temp, ph, coral_cover):
+    if temp > 30 or ph < 7.8 or coral_cover < 50:
+        return "Critical", "🔴"
+    elif temp > 29 or ph < 8.0 or coral_cover < 70:
+        return "Warning", "🟡"
+    else:
+        return "Healthy", "🟢"
 
-    st.markdown("### Time Series Trends")
-    fig = go.Figure()
-    colors = px.colors.qualitative.Set2
+# Current status overview
+st.header("📊 Real-Time Reef Health Dashboard")
+
+# Key metrics
+col1, col2, col3, col4 = st.columns(4)
+
+latest_data = filtered_df.groupby('reef_name').last().reset_index()
+avg_temp = latest_data['temperature'].mean()
+avg_ph = latest_data['ph'].mean()
+avg_coral = latest_data['coral_cover'].mean()
+critical_reefs = sum(1 for _, row in latest_data.iterrows()
+                    if get_health_status(row['temperature'], row['ph'], row['coral_cover'])[0] == "Critical")
+
+with col1:
+    st.metric("Average Temperature", f"{avg_temp:.1f}°C",
+             delta=f"{avg_temp - 28:.1f}°C from optimal")
+
+with col2:
+    st.metric("Average pH", f"{avg_ph:.2f}",
+             delta=f"{avg_ph - 8.1:.2f} from optimal")
+
+with col3:
+    st.metric("Average Coral Cover", f"{avg_coral:.1f}%",
+             delta=f"{avg_coral - 80:.1f}% from target")
+
+with col4:
+    st.metric("Reefs at Risk", f"{critical_reefs}",
+             delta=f"{critical_reefs} critical")
+
+# Alert system
+alerts = []
+for _, row in latest_data.iterrows():
+    status, icon = get_health_status(row['temperature'], row['ph'], row['coral_cover'])
+    if status in ["Critical", "Warning"]:
+        alerts.append({
+            'reef': row['reef_name'],
+            'status': status,
+            'icon': icon,
+            'temp': row['temperature'],
+            'ph': row['ph'],
+            'coral': row['coral_cover']
+        })
+
+if alerts:
+    st.subheader("⚠️ Active Alerts")
+    for alert in alerts:
+        if alert['status'] == "Critical":
+            st.markdown(f"""
+            <div class="alert-critical">
+                {alert['icon']} <strong>CRITICAL:</strong> {alert['reef']}<br>
+                Temperature: {alert['temp']:.1f}°C | pH: {alert['ph']:.2f} | Coral Cover: {alert['coral']:.1f}%
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.markdown(f"""
+            <div class="alert-warning">
+                {alert['icon']} <strong>WARNING:</strong> {alert['reef']}<br>
+                Temperature: {alert['temp']:.1f}°C | pH: {alert['ph']:.2f} | Coral Cover: {alert['coral']:.1f}%
+            </div>
+            """, unsafe_allow_html=True)
+
+# Main visualizations
+col1, col2 = st.columns([2, 1])
+
+with col1:
+    st.subheader("🌡️ Temperature Trends & Bleaching Risk")
+
+    fig = make_subplots(
+        rows=2, cols=1,
+        subplot_titles=("Sea Surface Temperature", "Coral Cover & Bleaching Events"),
+        vertical_spacing=0.1
+    )
+
+    colors = px.colors.qualitative.Set3
     for i, reef in enumerate(selected_reefs):
-        df_r = filtered_df[filtered_df['Reef'] == reef]
-        fig.add_trace(go.Scatter(x=df_r['Date'], y=df_r['Sea_Temperature'], mode='lines', name=f'{reef} Temp', line=dict(color=colors[i%len(colors)])))
-        fig.add_trace(go.Scatter(x=df_r['Date'], y=df_r['Satellite_NDVI'], mode='lines', name=f'{reef} NDVI', line=dict(color=colors[i%len(colors)], dash='dot')))
-        fig.add_trace(go.Scatter(x=df_r['Date'], y=df_r['Coral_Cover'], mode='lines', name=f'{reef} Coral Cover', line=dict(color=colors[i%len(colors)], dash='dash')))
+        reef_data = filtered_df[filtered_df['reef_name'] == reef]
 
-    fig.update_layout(height=400, hovermode='x unified', legend=dict(orientation='h', y=1.1))
+        # Temperature plot
+        fig.add_trace(
+            go.Scatter(
+                x=reef_data['date'],
+                y=reef_data['temperature'],
+                name=reef.split(' - ')[0],
+                line=dict(color=colors[i % len(colors)]),
+                hovertemplate="<b>%{fullData.name}</b><br>Date: %{x}<br>Temperature: %{y:.1f}°C<extra></extra>"
+            ),
+            row=1, col=1
+        )
+
+        # Coral cover plot
+        fig.add_trace(
+            go.Scatter(
+                x=reef_data['date'],
+                y=reef_data['coral_cover'],
+                name=reef.split(' - ')[0],
+                line=dict(color=colors[i % len(colors)]),
+                showlegend=False,
+                hovertemplate="<b>%{fullData.name}</b><br>Date: %{x}<br>Coral Cover: %{y:.1f}%<extra></extra>"
+            ),
+            row=2, col=1
+        )
+
+    # Add bleaching threshold line
+    fig.add_hline(y=29, line_dash="dash", line_color="orange",
+                  annotation_text="Bleaching Threshold", row=1, col=1)
+    fig.add_hline(y=30, line_dash="dash", line_color="red",
+                  annotation_text="Critical Threshold", row=1, col=1)
+
+    fig.update_layout(height=500, hovermode='x unified')
+    fig.update_yaxes(title_text="Temperature (°C)", row=1, col=1)
+    fig.update_yaxes(title_text="Coral Cover (%)", row=2, col=1)
+
     st.plotly_chart(fig, use_container_width=True)
 
-    st.markdown("### Spatial Coral Reef Health Map")
-    mean_bleaching = filtered_df.groupby(['Latitude','Longitude']).agg({'Bleaching_Index':'mean'}).reset_index()
-    min_b, max_b = mean_bleaching['Bleaching_Index'].min(), mean_bleaching['Bleaching_Index'].max()
-    import branca.colormap as cm
-    colormap = cm.linear.YlOrRd_09.scale(min_b, max_b)
-    colormap.caption = 'Avg Bleaching Index'
+with col2:
+    st.subheader("🎯 Current Reef Status")
 
-    m = folium.Map(location=[21.2, -157.7], zoom_start=10, tiles='CartoDB positron')
-    for _, row in mean_bleaching.iterrows():
-        color = colormap(row['Bleaching_Index'])
-        folium.CircleMarker(location=[row['Latitude'],row['Longitude']],
-                            radius=10,
-                            color=color,
-                            fill=True,
-                            fill_color=color,
-                            fill_opacity=0.7,
-                            tooltip=f"Bleaching Index: {row['Bleaching_Index']:.2f}").add_to(m)
-    colormap.add_to(m)
-    st_folium(m, width=750, height=450)
-
-with tabs[1]:
-    st.header("🤖 AI Prediction & Explainability")
-
-    st.markdown(f"**Model R² Score:** {model_score:.3f}")
-
-    st.markdown("Input parameters to predict coral cover with uncertainty estimates:")
-
-    col1, col2 = st.columns(2)
-    with col1:
-        temp_input = st.slider("Sea Temperature (°C)", 20.0, 35.0, 27.0)
-        ph_input = st.slider("pH Level", 7.5, 8.5, 8.1, 0.01)
-        turbidity_input = st.slider("Turbidity (NTU)", 0.1, 5.0, 1.0, 0.1)
-    with col2:
-        ndvi_input = st.slider("Satellite NDVI", 0.0, 1.0, 0.5, 0.01)
-        date_input = st.date_input("Prediction Date", value=df['Date'].max())
-
-    day_of_year = date_input.timetuple().tm_yday
-    pred, lower, upper = coral_cover_forecast_with_uncertainty(temp_input, ph_input, turbidity_input, ndvi_input, day_of_year)
-
-    st.metric("Predicted Coral Cover (%)", f"{pred:.2f}%", delta=f"± {(upper-lower)/2:.2f}%")
-    st.markdown(f"Confidence Interval: [{lower:.2f}%, {upper:.2f}%]")
-
-    # SHAP explainability - for demonstration, approximate by running model pipeline predict and explain
-    feature_df = pd.DataFrame({'Sea_Temperature':[temp_input], 'pH':[ph_input], 'Turbidity_NTU':[turbidity_input], 'Satellite_NDVI':[ndvi_input], 'DayOfYear':[day_of_year]})
-    shap_values = explainer.shap_values(feature_df)[0]
-    st.markdown("### Model Feature Contributions (SHAP Values)")
-
-    shap.initjs()
-    shap_fig = shap.plots._waterfall.waterfall_legacy(explainer.expected_value, shap_values, feature_df.columns.tolist(), show=False)
-    buf = io.BytesIO()
-    shap_fig.savefig(buf, format='png', bbox_inches='tight')
-    buf.seek(0)
-    st.image(buf)
-
-with tabs[2]:
-    st.header("🖼️ Coral Species & Bleaching Severity Classifier")
-
-    uploaded_file = st.file_uploader("Upload Coral Image (JPEG/PNG)", type=['jpg','jpeg','png'])
-    if uploaded_file:
-        bytes_data = uploaded_file.read()
-        species, severity, confidence = mock_coral_classifier(bytes_data)
-        st.image(uploaded_file, caption="Uploaded Coral Image", use_column_width=True)
-        st.success(f"Detected Species: **{species}**")
-        st.info(f"Bleaching Severity: **{severity}**")
-        st.write(f"Model Confidence: **{confidence*100:.1f}%**")
-    else:
-        st.info("Upload a coral photo to classify species and bleaching severity.")
-
-with tabs[3]:
-    st.header("🌐 3D Coral Reef Photogrammetry Explorer")
-
-    # Dummy reef point cloud coords for demo
-    np.random.seed(42)
-    points = pd.DataFrame({
-        'lat': np.random.uniform(21.0,21.6, 1000),
-        'lon': np.random.uniform(-158.0,-157.4, 1000),
-        'depth': np.random.uniform(-15,-1, 1000),
-        'species': np.random.choice(['Acropora','Montipora','Porites'], 1000)
-    })
-    species_color = {'Acropora':'#1f77b4','Montipora':'#ff7f0e','Porites':'#2ca02c'}
-    points['color'] = points['species'].map(species_color).fillna('#d62728')
-
-    layer = pdk.Layer(
-        'ScatterplotLayer',
-        data=points,
-        get_position='[lon, lat, depth]',
-        get_color='color',
-        get_radius=20,
-        pickable=True,
-        auto_highlight=True,
-        radius_scale=20,
-        radius_min_pixels=2,
-        radius_max_pixels=15,
-    )
-    view_state = pdk.ViewState(latitude=21.3, longitude=-157.7, zoom=12, pitch=45)
-
-    r = pdk.Deck(layers=[layer], initial_view_state=view_state, tooltip={"text": "{species}"})
-    st.pydeck_chart(r)
-
-with tabs[4]:
-    st.header("⚠️ Anomaly Detection & ENSO Phases")
-
-    anomalies = detect_anomalies(df)
-    st.markdown("### Detected Water Chemistry Anomalies")
-    st.dataframe(anomalies)
-
-    st.markdown("### ENSO Phases Over Time")
-    df['ENSO_Phase'] = df['Date'].apply(get_enso_phase)
-    enso_counts = df.groupby(['Date','ENSO_Phase']).size().reset_index(name='Count')
-    fig_enso = px.area(enso_counts, x='Date', y='Count', color='ENSO_Phase', title="ENSO Phase Temporal Distribution")
-    st.plotly_chart(fig_enso, use_container_width=True)
-
-with tabs[5]:
-    st.header("🤝 Collaborative Annotation & Data Export")
-
-    if 'annotations' not in st.session_state:
-        st.session_state['annotations'] = []
-
-    st.markdown("### Annotate Reef Health Notes")
-
-    reef_for_note = st.selectbox("Select Reef to Annotate", reefs)
-    date_for_note = st.date_input("Select Date for Note", value=datetime.date.today())
-    note_text = st.text_area("Enter Annotation Text")
-
-    if st.button("Add Annotation"):
-        st.session_state.annotations.append({
-            'reef': reef_for_note,
-            'date': date_for_note,
-            'note': note_text
+    # Status summary chart
+    status_data = []
+    for _, row in latest_data.iterrows():
+        status, icon = get_health_status(row['temperature'], row['ph'], row['coral_cover'])
+        status_data.append({
+            'reef': row['reef_name'].split(' - ')[0],
+            'status': status,
+            'temperature': row['temperature'],
+            'ph': row['ph'],
+            'coral_cover': row['coral_cover']
         })
-        st.success("Annotation added!")
 
-    if st.session_state.annotations:
-        st.markdown("### Current Annotations")
-        st.dataframe(pd.DataFrame(st.session_state.annotations))
+    status_df = pd.DataFrame(status_data)
+    status_counts = status_df['status'].value_counts()
 
-    # Export filtered data + annotations
-    combined_export = filtered_df.copy()
-    if st.session_state.annotations:
-        ann_df = pd.DataFrame(st.session_state.annotations)
-        ann_df['Date'] = pd.to_datetime(ann_df['date'])
-        combined_export = combined_export.merge(ann_df, left_on=['Reef','Date'], right_on=['reef','Date'], how='left')
+    colors_status = {'Healthy': '#10b981', 'Warning': '#f59e0b', 'Critical': '#ef4444'}
 
-    csv_export = combined_export.to_csv(index=False).encode('utf-8')
-    st.download_button("Download Reef Data + Annotations CSV", csv_export, "coraldash_full_export.csv", "text/csv")
+    fig_pie = px.pie(
+        values=status_counts.values,
+        names=status_counts.index,
+        color=status_counts.index,
+        color_discrete_map=colors_status,
+        title="Reef Health Distribution"
+    )
+    fig_pie.update_traces(textposition='inside', textinfo='percent+label')
+    fig_pie.update_layout(height=300)
+    st.plotly_chart(fig_pie, use_container_width=True)
 
-# ---- End of MegaApp ----
+    # Detailed status table
+    st.subheader("📋 Detailed Status")
+    for _, row in status_df.iterrows():
+        status_class = f"status-{row['status'].lower()}"
+        st.markdown(f"""
+        <div style="padding: 0.5rem; margin: 0.5rem 0; border-radius: 5px; background: #f8fafc;">
+            <strong>{row['reef']}</strong><br>
+            <span class="{status_class}">{row['status']}</span><br>
+            🌡️ {row['temperature']:.1f}°C | 🧪 {row['ph']:.2f} | 🪸 {row['coral_cover']:.0f}%
+        </div>
+        """, unsafe_allow_html=True)
+
+# Water quality analysis
+st.header("🧪 Water Quality Analysis")
+
+col1, col2 = st.columns(2)
+
+with col1:
+    st.subheader("pH Levels")
+    fig_ph = px.box(
+        filtered_df,
+        x='reef_name',
+        y='ph',
+        color='reef_name',
+        title="pH Distribution by Reef"
+    )
+    fig_ph.add_hline(y=8.1, line_dash="dash", line_color="green",
+                     annotation_text="Optimal pH")
+    fig_ph.add_hline(y=7.8, line_dash="dash", line_color="red",
+                     annotation_text="Critical pH")
+    fig_ph.update_xaxes(title="", tickangle=45)
+    fig_ph.update_layout(showlegend=False, height=400)
+    st.plotly_chart(fig_ph, use_container_width=True)
+
+with col2:
+    st.subheader("Turbidity Levels")
+    fig_turb = px.violin(
+        filtered_df,
+        x='reef_name',
+        y='turbidity',
+        color='reef_name',
+        title="Turbidity Distribution by Reef"
+    )
+    fig_turb.update_xaxes(title="", tickangle=45)
+    fig_turb.update_layout(showlegend=False, height=400)
+    st.plotly_chart(fig_turb, use_container_width=True)
+
+# Predictive analytics
+st.header("🔮 Predictive Analytics")
+
+# Simple ML model for demonstration
+@st.cache_resource
+def train_model():
+    # Prepare features
+    model_df = df.copy()
+    model_df['month'] = model_df['date'].dt.month
+    model_df['day_of_year'] = model_df['date'].dt.dayofyear
+
+    features = ['temperature', 'ph', 'turbidity', 'salinity', 'dissolved_oxygen', 'month', 'day_of_year']
+    X = model_df[features]
+    y = model_df['coral_cover']
+
+    # Train model
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+
+    model = RandomForestRegressor(n_estimators=100, random_state=42)
+    model.fit(X_scaled, y)
+
+    return model, scaler, features
+
+model, scaler, features = train_model()
+
+st.subheader("🎯 Coral Cover Prediction")
+
+col1, col2, col3 = st.columns(3)
+
+with col1:
+    pred_temp = st.slider("Temperature (°C)", 25.0, 35.0, 28.0, 0.1)
+    pred_ph = st.slider("pH", 7.5, 8.5, 8.1, 0.01)
+
+with col2:
+    pred_turbidity = st.slider("Turbidity (NTU)", 0.1, 10.0, 1.0, 0.1)
+    pred_salinity = st.slider("Salinity (ppt)", 30.0, 40.0, 35.0, 0.1)
+
+with col3:
+    pred_do = st.slider("Dissolved Oxygen (mg/L)", 5.0, 12.0, 8.0, 0.1)
+    pred_month = st.selectbox("Month", range(1, 13), index=5)
+
+# Make prediction
+pred_data = pd.DataFrame({
+    'temperature': [pred_temp],
+    'ph': [pred_ph],
+    'turbidity': [pred_turbidity],
+    'salinity': [pred_salinity],
+    'dissolved_oxygen': [pred_do],
+    'month': [pred_month],
+    'day_of_year': [pred_month * 30]  # Approximation
+})
+
+pred_scaled = scaler.transform(pred_data)
+prediction = model.predict(pred_scaled)[0]
+
+# Display prediction with color coding
+if prediction >= 75:
+    pred_color = "🟢"
+    pred_status = "Excellent"
+elif prediction >= 60:
+    pred_color = "🟡"
+    pred_status = "Moderate"
+else:
+    pred_color = "🔴"
+    pred_status = "Poor"
+
+st.markdown(f"""
+<div style="text-align: center; padding: 2rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 10px; color: white; margin: 1rem 0;">
+    <h2>Predicted Coral Cover</h2>
+    <h1>{pred_color} {prediction:.1f}%</h1>
+    <h3>Status: {pred_status}</h3>
+</div>
+""", unsafe_allow_html=True)
+
+# Export functionality
+st.header("📤 Data Export")
+
+col1, col2 = st.columns(2)
+
+with col1:
+    # Summary statistics
+    summary_stats = filtered_df.groupby('reef_name').agg({
+        'temperature': ['mean', 'max', 'min'],
+        'ph': ['mean', 'max', 'min'],
+        'coral_cover': ['mean', 'max', 'min'],
+        'bleaching_severity': 'max'
+    }).round(2)
+
+    csv_summary = summary_stats.to_csv()
+    st.download_button(
+        label="📊 Download Summary Statistics",
+        data=csv_summary,
+        file_name=f"coral_summary_{datetime.date.today()}.csv",
+        mime="text/csv"
+    )
+
+with col2:
+    # Full dataset
+    csv_full = filtered_df.to_csv(index=False)
+    st.download_button(
+        label="📋 Download Full Dataset",
+        data=csv_full,
+        file_name=f"coral_data_{datetime.date.today()}.csv",
+        mime="text/csv"
+    )
+
+# Footer
+st.markdown("---")
+st.markdown("""
+<div style="text-align: center; color: #6b7280; padding: 1rem;">
+    <p>🪸 <strong>CoralDash Pro</strong> | Advanced Coral Reef Monitoring Platform</p>
+    <p>Powered by AI & Machine Learning | Real-time Environmental Monitoring</p>
+</div>
+""", unsafe_allow_html=True)
