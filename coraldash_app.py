@@ -1,464 +1,480 @@
 import streamlit as st
 import pandas as pd
+import geopandas as gpd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-import datetime
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.preprocessing import StandardScaler
-import seaborn as sns
+import folium
+from streamlit_folium import folium_static
+from sklearn.cluster import DBSCAN
+from scipy.spatial.distance import pdist, squareform
+from scipy.stats import gaussian_kde
+import requests
+import json
+from shapely.geometry import Point
+import warnings
+warnings.filterwarnings('ignore')
 
-# Professional styling
+# Page configuration
 st.set_page_config(
-    page_title="CoralDash Pro",
-    page_icon="🪸",
+    page_title="🌠 Meteorite Impact Analysis",
+    page_icon="🌠",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for professional styling
+# Custom CSS for better styling
 st.markdown("""
 <style>
     .main-header {
-        background: linear-gradient(90deg, #1e3a8a 0%, #3b82f6 50%, #06b6d4 100%);
-        padding: 2rem;
-        border-radius: 10px;
-        color: white;
+        font-size: 3rem;
+        font-weight: bold;
+        color: #1f77b4;
         text-align: center;
-        margin-bottom: 2rem;
+        margin-bottom: 1rem;
     }
-    .metric-card {
-        background: white;
-        padding: 1rem;
-        border-radius: 8px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        border-left: 4px solid #3b82f6;
+    .sub-header {
+        font-size: 1.5rem;
+        color: #2c3e50;
+        margin-top: 2rem;
+        margin-bottom: 1rem;
     }
-    .alert-critical {
-        background: #fee2e2;
-        border: 1px solid #fca5a5;
-        border-radius: 8px;
+    .metric-container {
+        background-color: #f8f9fa;
         padding: 1rem;
+        border-radius: 0.5rem;
+        border-left: 4px solid #1f77b4;
+    }
+    .insight-box {
+        background-color: #e8f4f8;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        border-left: 4px solid #17a2b8;
         margin: 1rem 0;
     }
-    .alert-warning {
-        background: #fef3c7;
-        border: 1px solid #fcd34d;
-        border-radius: 8px;
-        padding: 1rem;
-        margin: 1rem 0;
-    }
-    .status-healthy { color: #10b981; font-weight: bold; }
-    .status-warning { color: #f59e0b; font-weight: bold; }
-    .status-critical { color: #ef4444; font-weight: bold; }
 </style>
 """, unsafe_allow_html=True)
 
-# Header
-st.markdown("""
-<div class="main-header">
-    <h1>🪸 CoralDash Pro</h1>
-    <p>Advanced Coral Reef Health Monitoring & Predictive Analytics Platform</p>
-</div>
-""", unsafe_allow_html=True)
-
-# Generate realistic coral reef data
 @st.cache_data
-def load_coral_data():
-    np.random.seed(42)
-    reefs = [
-        {"name": "Great Barrier Reef - North", "lat": -16.2839, "lon": 145.7781},
-        {"name": "Great Barrier Reef - Central", "lat": -20.3444, "lon": 149.0969},
-        {"name": "Coral Triangle - Palawan", "lat": 9.8349, "lon": 118.7384},
-        {"name": "Red Sea - Eilat", "lat": 29.5581, "lon": 34.9482},
-        {"name": "Caribbean - Bonaire", "lat": 12.1696, "lon": -68.2900},
-        {"name": "Maldives - North Malé", "lat": 4.1755, "lon": 73.5093}
-    ]
+def load_meteorite_data():
+    """Load meteorite data from NASA's Open Data Portal"""
+    try:
+        # NASA Meteorite Landings Dataset
+        url = "https://data.nasa.gov/resource/y77d-th95.json"
+        response = requests.get(url, params={"$limit": 50000})
+        data = response.json()
+        df = pd.DataFrame(data)
+        
+        # Clean and process the data
+        df = df.dropna(subset=['reclat', 'reclong'])
+        df['reclat'] = pd.to_numeric(df['reclat'], errors='coerce')
+        df['reclong'] = pd.to_numeric(df['reclong'], errors='coerce')
+        df['mass'] = pd.to_numeric(df['mass'], errors='coerce')
+        df['year'] = pd.to_numeric(df['year'], errors='coerce')
+        
+        # Remove invalid coordinates
+        df = df[(df['reclat'].between(-90, 90)) & (df['reclong'].between(-180, 180))]
+        
+        # Create geometry column for GeoPandas
+        geometry = [Point(xy) for xy in zip(df['reclong'], df['reclat'])]
+        gdf = gpd.GeoDataFrame(df, geometry=geometry, crs='EPSG:4326')
+        
+        return gdf
+    except Exception as e:
+        st.error(f"Error loading data: {e}")
+        return None
 
-    dates = pd.date_range('2023-01-01', '2024-12-31', freq='D')
-    data = []
+@st.cache_data
+def load_world_data():
+    """Load world countries data for context"""
+    try:
+        world = gpd.read_file(gpd.datasets.get_path('naturalearth_lowres'))
+        return world
+    except:
+        return None
 
-    for reef in reefs:
-        base_temp = np.random.uniform(26, 29)
-        base_ph = np.random.uniform(7.9, 8.2)
+def perform_clustering_analysis(gdf, eps_km=200, min_samples=5):
+    """Perform DBSCAN clustering on meteorite locations"""
+    # Convert to Web Mercator for distance calculations
+    gdf_proj = gdf.to_crs('EPSG:3857')
+    
+    # Extract coordinates
+    coords = np.column_stack([gdf_proj.geometry.x, gdf_proj.geometry.y])
+    
+    # Perform DBSCAN clustering (eps in meters, converted from km)
+    eps_meters = eps_km * 1000
+    clustering = DBSCAN(eps=eps_meters, min_samples=min_samples).fit(coords)
+    
+    # Add cluster labels to original dataframe
+    gdf_clustered = gdf.copy()
+    gdf_clustered['cluster'] = clustering.labels_
+    
+    return gdf_clustered
 
-        for i, date in enumerate(dates):
-            # Seasonal patterns
-            seasonal_temp = base_temp + 2 * np.sin(2 * np.pi * i / 365) + np.random.normal(0, 0.5)
-            seasonal_ph = base_ph + 0.1 * np.cos(2 * np.pi * i / 365) + np.random.normal(0, 0.02)
-
-            # Coral health based on temperature stress
-            temp_stress = max(0, seasonal_temp - 29)
-            coral_cover = max(20, 85 - temp_stress * 15 + np.random.normal(0, 5))
-
-            # Other parameters
-            turbidity = np.clip(np.random.lognormal(0, 0.5), 0.1, 10)
-            salinity = np.random.normal(35, 0.5)
-            dissolved_oxygen = np.random.normal(8, 0.5)
-
-            # Bleaching events (temperature > 30°C)
-            bleaching_severity = 0
-            if seasonal_temp > 30:
-                bleaching_severity = min(100, (seasonal_temp - 30) * 25)
-
-            data.append({
-                'reef_name': reef['name'],
-                'latitude': reef['lat'],
-                'longitude': reef['lon'],
-                'date': date,
-                'temperature': seasonal_temp,
-                'ph': seasonal_ph,
-                'coral_cover': coral_cover,
-                'turbidity': turbidity,
-                'salinity': salinity,
-                'dissolved_oxygen': dissolved_oxygen,
-                'bleaching_severity': bleaching_severity
-            })
-
-    return pd.DataFrame(data)
-
-# Load data
-df = load_coral_data()
-
-# Sidebar controls
-st.sidebar.header("🎛️ Control Panel")
-
-# Reef selection
-selected_reefs = st.sidebar.multiselect(
-    "Select Reef Sites",
-    options=df['reef_name'].unique(),
-    default=df['reef_name'].unique()[:3]
-)
-
-# Date range
-date_range = st.sidebar.date_input(
-    "Date Range",
-    value=[df['date'].min().date(), df['date'].max().date()],
-    min_value=df['date'].min().date(),
-    max_value=df['date'].max().date()
-)
-
-# Filter data
-filtered_df = df[
-    (df['reef_name'].isin(selected_reefs)) &
-    (df['date'] >= pd.to_datetime(date_range[0])) &
-    (df['date'] <= pd.to_datetime(date_range[1]))
-]
-
-# Health status function
-def get_health_status(temp, ph, coral_cover):
-    if temp > 30 or ph < 7.8 or coral_cover < 50:
-        return "Critical", "🔴"
-    elif temp > 29 or ph < 8.0 or coral_cover < 70:
-        return "Warning", "🟡"
-    else:
-        return "Healthy", "🟢"
-
-# Current status overview
-st.header("📊 Real-Time Reef Health Dashboard")
-
-# Key metrics
-col1, col2, col3, col4 = st.columns(4)
-
-latest_data = filtered_df.groupby('reef_name').last().reset_index()
-avg_temp = latest_data['temperature'].mean()
-avg_ph = latest_data['ph'].mean()
-avg_coral = latest_data['coral_cover'].mean()
-critical_reefs = sum(1 for _, row in latest_data.iterrows()
-                    if get_health_status(row['temperature'], row['ph'], row['coral_cover'])[0] == "Critical")
-
-with col1:
-    st.metric("Average Temperature", f"{avg_temp:.1f}°C",
-             delta=f"{avg_temp - 28:.1f}°C from optimal")
-
-with col2:
-    st.metric("Average pH", f"{avg_ph:.2f}",
-             delta=f"{avg_ph - 8.1:.2f} from optimal")
-
-with col3:
-    st.metric("Average Coral Cover", f"{avg_coral:.1f}%",
-             delta=f"{avg_coral - 80:.1f}% from target")
-
-with col4:
-    st.metric("Reefs at Risk", f"{critical_reefs}",
-             delta=f"{critical_reefs} critical")
-
-# Alert system
-alerts = []
-for _, row in latest_data.iterrows():
-    status, icon = get_health_status(row['temperature'], row['ph'], row['coral_cover'])
-    if status in ["Critical", "Warning"]:
-        alerts.append({
-            'reef': row['reef_name'],
-            'status': status,
-            'icon': icon,
-            'temp': row['temperature'],
-            'ph': row['ph'],
-            'coral': row['coral_cover']
-        })
-
-if alerts:
-    st.subheader("⚠️ Active Alerts")
-    for alert in alerts:
-        if alert['status'] == "Critical":
-            st.markdown(f"""
-            <div class="alert-critical">
-                {alert['icon']} <strong>CRITICAL:</strong> {alert['reef']}<br>
-                Temperature: {alert['temp']:.1f}°C | pH: {alert['ph']:.2f} | Coral Cover: {alert['coral']:.1f}%
-            </div>
-            """, unsafe_allow_html=True)
+def calculate_density_statistics(gdf):
+    """Calculate meteorite density statistics by continent/region"""
+    # Simple continent assignment based on coordinates
+    def assign_continent(lat, lon):
+        if lat > 70:
+            return "Arctic"
+        elif lat < -60:
+            return "Antarctica"
+        elif -35 < lat < 70 and -10 < lon < 60:
+            return "Europe/Asia"
+        elif -35 < lat < 40 and -20 < lon < 50:
+            return "Africa"
+        elif 10 < lat < 70 and -170 < lon < -50:
+            return "North America"
+        elif -60 < lat < 15 and -85 < lon < -35:
+            return "South America"
+        elif -50 < lat < -10 and 110 < lon < 180:
+            return "Australia/Oceania"
         else:
-            st.markdown(f"""
-            <div class="alert-warning">
-                {alert['icon']} <strong>WARNING:</strong> {alert['reef']}<br>
-                Temperature: {alert['temp']:.1f}°C | pH: {alert['ph']:.2f} | Coral Cover: {alert['coral']:.1f}%
-            </div>
-            """, unsafe_allow_html=True)
+            return "Other"
+    
+    gdf['continent'] = gdf.apply(lambda row: assign_continent(row['reclat'], row['reclong']), axis=1)
+    
+    continent_stats = gdf.groupby('continent').agg({
+        'name': 'count',
+        'mass': ['mean', 'median', 'sum'],
+        'year': ['min', 'max']
+    }).round(2)
+    
+    return continent_stats
 
-# Main visualizations
-col1, col2 = st.columns([2, 1])
+def create_main_map(gdf, world_gdf=None):
+    """Create main meteorite distribution map using Folium"""
+    # Create base map
+    m = folium.Map(location=[20, 0], zoom_start=2, tiles='OpenStreetMap')
+    
+    # Add world boundaries if available
+    if world_gdf is not None:
+        folium.GeoJson(
+            world_gdf.to_json(),
+            style_function=lambda x: {
+                'fillColor': '#f0f0f0',
+                'color': '#999999',
+                'weight': 1,
+                'fillOpacity': 0.3
+            }
+        ).add_to(m)
+    
+    # Add meteorite points
+    for idx, row in gdf.iterrows():
+        if pd.notna(row['mass']):
+            # Size based on mass (log scale)
+            size = max(3, min(15, np.log10(float(row['mass']) + 1) * 2))
+            color = 'red' if float(row['mass']) > 10000 else 'orange' if float(row['mass']) > 1000 else 'yellow'
+        else:
+            size = 3
+            color = 'blue'
+        
+        popup_text = f"""
+        <b>{row['name']}</b><br>
+        Year: {row.get('year', 'Unknown')}<br>
+        Mass: {row.get('mass', 'Unknown')} g<br>
+        Class: {row.get('recclass', 'Unknown')}<br>
+        Location: ({row['reclat']:.2f}, {row['reclong']:.2f})
+        """
+        
+        folium.CircleMarker(
+            location=[row['reclat'], row['reclong']],
+            radius=size,
+            popup=folium.Popup(popup_text, max_width=300),
+            color='black',
+            weight=1,
+            fillColor=color,
+            fillOpacity=0.7
+        ).add_to(m)
+    
+    return m
 
-with col1:
-    st.subheader("🌡️ Temperature Trends & Bleaching Risk")
+def create_cluster_map(gdf_clustered):
+    """Create cluster visualization map"""
+    m = folium.Map(location=[20, 0], zoom_start=2)
+    
+    # Color palette for clusters
+    colors = ['red', 'blue', 'green', 'purple', 'orange', 'darkred', 'lightred', 
+              'beige', 'darkblue', 'darkgreen', 'cadetblue', 'darkpurple', 'white', 
+              'pink', 'lightblue', 'lightgreen', 'gray', 'black', 'lightgray']
+    
+    # Add clustered points
+    for idx, row in gdf_clustered.iterrows():
+        if row['cluster'] == -1:
+            color = 'gray'  # Noise points
+            popup_text = f"<b>{row['name']}</b><br>Cluster: Noise<br>Year: {row.get('year', 'Unknown')}"
+        else:
+            color = colors[row['cluster'] % len(colors)]
+            popup_text = f"<b>{row['name']}</b><br>Cluster: {row['cluster']}<br>Year: {row.get('year', 'Unknown')}"
+        
+        folium.CircleMarker(
+            location=[row['reclat'], row['reclong']],
+            radius=5,
+            popup=folium.Popup(popup_text, max_width=200),
+            color='black',
+            weight=1,
+            fillColor=color,
+            fillOpacity=0.7
+        ).add_to(m)
+    
+    return m
 
+def create_temporal_analysis(gdf):
+    """Create temporal analysis visualizations"""
+    # Filter for valid years
+    gdf_temporal = gdf[gdf['year'].notna() & (gdf['year'] > 1800) & (gdf['year'] <= 2024)]
+    
+    if len(gdf_temporal) == 0:
+        return None, None
+    
+    # Discoveries over time
+    yearly_counts = gdf_temporal.groupby('year').size().reset_index(name='count')
+    yearly_counts['cumulative'] = yearly_counts['count'].cumsum()
+    
+    # Create subplot figure
     fig = make_subplots(
-        rows=2, cols=1,
-        subplot_titles=("Sea Surface Temperature", "Coral Cover & Bleaching Events"),
-        vertical_spacing=0.1
+        rows=2, cols=2,
+        subplot_titles=('Meteorite Discoveries Over Time', 'Cumulative Discoveries', 
+                       'Mass Distribution by Decade', 'Discovery Locations by Era'),
+        specs=[[{"secondary_y": False}, {"secondary_y": False}],
+               [{"secondary_y": False}, {"secondary_y": False}]]
     )
-
-    colors = px.colors.qualitative.Set3
-    for i, reef in enumerate(selected_reefs):
-        reef_data = filtered_df[filtered_df['reef_name'] == reef]
-
-        # Temperature plot
+    
+    # Annual discoveries
+    fig.add_trace(
+        go.Scatter(x=yearly_counts['year'], y=yearly_counts['count'], 
+                  mode='lines+markers', name='Annual Discoveries'),
+        row=1, col=1
+    )
+    
+    # Cumulative discoveries
+    fig.add_trace(
+        go.Scatter(x=yearly_counts['year'], y=yearly_counts['cumulative'], 
+                  mode='lines', name='Cumulative Discoveries', line=dict(color='red')),
+        row=1, col=2
+    )
+    
+    # Mass distribution by decade
+    gdf_temporal['decade'] = (gdf_temporal['year'] // 10) * 10
+    decade_mass = gdf_temporal[gdf_temporal['mass'].notna()]
+    
+    if len(decade_mass) > 0:
         fig.add_trace(
-            go.Scatter(
-                x=reef_data['date'],
-                y=reef_data['temperature'],
-                name=reef.split(' - ')[0],
-                line=dict(color=colors[i % len(colors)]),
-                hovertemplate="<b>%{fullData.name}</b><br>Date: %{x}<br>Temperature: %{y:.1f}°C<extra></extra>"
-            ),
-            row=1, col=1
-        )
-
-        # Coral cover plot
-        fig.add_trace(
-            go.Scatter(
-                x=reef_data['date'],
-                y=reef_data['coral_cover'],
-                name=reef.split(' - ')[0],
-                line=dict(color=colors[i % len(colors)]),
-                showlegend=False,
-                hovertemplate="<b>%{fullData.name}</b><br>Date: %{x}<br>Coral Cover: %{y:.1f}%<extra></extra>"
-            ),
+            go.Box(x=decade_mass['decade'], y=np.log10(decade_mass['mass'] + 1), 
+                   name='Log Mass by Decade'),
             row=2, col=1
         )
-
-    # Add bleaching threshold line
-    fig.add_hline(y=29, line_dash="dash", line_color="orange",
-                  annotation_text="Bleaching Threshold", row=1, col=1)
-    fig.add_hline(y=30, line_dash="dash", line_color="red",
-                  annotation_text="Critical Threshold", row=1, col=1)
-
-    fig.update_layout(height=500, hovermode='x unified')
-    fig.update_yaxes(title_text="Temperature (°C)", row=1, col=1)
-    fig.update_yaxes(title_text="Coral Cover (%)", row=2, col=1)
-
-    st.plotly_chart(fig, use_container_width=True)
-
-with col2:
-    st.subheader("🎯 Current Reef Status")
-
-    # Status summary chart
-    status_data = []
-    for _, row in latest_data.iterrows():
-        status, icon = get_health_status(row['temperature'], row['ph'], row['coral_cover'])
-        status_data.append({
-            'reef': row['reef_name'].split(' - ')[0],
-            'status': status,
-            'temperature': row['temperature'],
-            'ph': row['ph'],
-            'coral_cover': row['coral_cover']
-        })
-
-    status_df = pd.DataFrame(status_data)
-    status_counts = status_df['status'].value_counts()
-
-    colors_status = {'Healthy': '#10b981', 'Warning': '#f59e0b', 'Critical': '#ef4444'}
-
-    fig_pie = px.pie(
-        values=status_counts.values,
-        names=status_counts.index,
-        color=status_counts.index,
-        color_discrete_map=colors_status,
-        title="Reef Health Distribution"
+    
+    # Geographic distribution by era
+    modern = gdf_temporal[gdf_temporal['year'] >= 1950]
+    historical = gdf_temporal[gdf_temporal['year'] < 1950]
+    
+    fig.add_trace(
+        go.Scattergeo(
+            lat=historical['reclat'], lon=historical['reclong'],
+            mode='markers', name='Pre-1950',
+            marker=dict(size=3, color='blue', opacity=0.6)
+        ), row=2, col=2
     )
-    fig_pie.update_traces(textposition='inside', textinfo='percent+label')
-    fig_pie.update_layout(height=300)
-    st.plotly_chart(fig_pie, use_container_width=True)
-
-    # Detailed status table
-    st.subheader("📋 Detailed Status")
-    for _, row in status_df.iterrows():
-        status_class = f"status-{row['status'].lower()}"
-        st.markdown(f"""
-        <div style="padding: 0.5rem; margin: 0.5rem 0; border-radius: 5px; background: #f8fafc;">
-            <strong>{row['reef']}</strong><br>
-            <span class="{status_class}">{row['status']}</span><br>
-            🌡️ {row['temperature']:.1f}°C | 🧪 {row['ph']:.2f} | 🪸 {row['coral_cover']:.0f}%
-        </div>
-        """, unsafe_allow_html=True)
-
-# Water quality analysis
-st.header("🧪 Water Quality Analysis")
-
-col1, col2 = st.columns(2)
-
-with col1:
-    st.subheader("pH Levels")
-    fig_ph = px.box(
-        filtered_df,
-        x='reef_name',
-        y='ph',
-        color='reef_name',
-        title="pH Distribution by Reef"
+    
+    fig.add_trace(
+        go.Scattergeo(
+            lat=modern['reclat'], lon=modern['reclong'],
+            mode='markers', name='1950+',
+            marker=dict(size=3, color='red', opacity=0.6)
+        ), row=2, col=2
     )
-    fig_ph.add_hline(y=8.1, line_dash="dash", line_color="green",
-                     annotation_text="Optimal pH")
-    fig_ph.add_hline(y=7.8, line_dash="dash", line_color="red",
-                     annotation_text="Critical pH")
-    fig_ph.update_xaxes(title="", tickangle=45)
-    fig_ph.update_layout(showlegend=False, height=400)
-    st.plotly_chart(fig_ph, use_container_width=True)
+    
+    fig.update_layout(height=800, showlegend=True, title_text="Temporal Analysis of Meteorite Discoveries")
+    fig.update_geos(projection_type="natural earth", row=2, col=2)
+    
+    return fig, yearly_counts
 
-with col2:
-    st.subheader("Turbidity Levels")
-    fig_turb = px.violin(
-        filtered_df,
-        x='reef_name',
-        y='turbidity',
-        color='reef_name',
-        title="Turbidity Distribution by Reef"
-    )
-    fig_turb.update_xaxes(title="", tickangle=45)
-    fig_turb.update_layout(showlegend=False, height=400)
-    st.plotly_chart(fig_turb, use_container_width=True)
+def main():
+    st.markdown('<div class="main-header">🌠 Global Meteorite Impact Analysis</div>', unsafe_allow_html=True)
+    st.markdown("### Uncovering spatial patterns and stories from meteorite landings across Earth")
+    
+    # Sidebar controls
+    st.sidebar.title("Analysis Controls")
+    
+    # Load data
+    with st.spinner("Loading meteorite data..."):
+        gdf = load_meteorite_data()
+        world_gdf = load_world_data()
+    
+    if gdf is None:
+        st.error("Failed to load meteorite data. Please check your internet connection.")
+        return
+    
+    # Basic statistics
+    st.markdown('<div class="sub-header">📊 Dataset Overview</div>', unsafe_allow_html=True)
+    
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Total Meteorites", f"{len(gdf):,}")
+    with col2:
+        valid_mass = gdf[gdf['mass'].notna()]
+        if len(valid_mass) > 0:
+            st.metric("Avg Mass", f"{valid_mass['mass'].mean():.1f}g")
+        else:
+            st.metric("Avg Mass", "N/A")
+    with col3:
+        valid_years = gdf[gdf['year'].notna()]
+        if len(valid_years) > 0:
+            st.metric("Year Range", f"{int(valid_years['year'].min())}-{int(valid_years['year'].max())}")
+        else:
+            st.metric("Year Range", "N/A")
+    with col4:
+        countries_covered = len(gdf['reclong'].unique())  # Rough estimate
+        st.metric("Global Coverage", f"{countries_covered} regions")
+    
+    # Main visualizations
+    tab1, tab2, tab3, tab4 = st.tabs(["🗺️ Global Distribution", "🎯 Cluster Analysis", "📈 Temporal Patterns", "🌍 Continental Analysis"])
+    
+    with tab1:
+        st.markdown('<div class="sub-header">Global Meteorite Distribution</div>', unsafe_allow_html=True)
+        
+        # Mass filter
+        mass_filter = st.slider("Minimum Mass (grams)", 0, 10000, 0, step=100)
+        filtered_gdf = gdf[gdf['mass'].fillna(0) >= mass_filter] if mass_filter > 0 else gdf
+        
+        st.markdown(f"Showing {len(filtered_gdf):,} meteorites")
+        
+        # Create and display map
+        main_map = create_main_map(filtered_gdf.head(1000), world_gdf)  # Limit for performance
+        folium_static(main_map, width=1200, height=600)
+        
+        # Key insights
+        st.markdown('<div class="insight-box">', unsafe_allow_html=True)
+        st.markdown("**Key Insights:**")
+        st.markdown("""
+        - **Desert Bias**: Many meteorites are found in arid regions (Sahara, Antarctica, Australia) where preservation is better
+        - **Population Correlation**: Increased discoveries in populated areas reflect reporting bias rather than impact density
+        - **Coastal Patterns**: Fewer discoveries over oceans due to collection challenges
+        - **Size Distribution**: Larger meteorites (red dots) are relatively rare and often found in remote areas
+        """)
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    with tab2:
+        st.markdown('<div class="sub-header">Meteorite Clustering Analysis</div>', unsafe_allow_html=True)
+        
+        # Clustering parameters
+        col1, col2 = st.columns(2)
+        with col1:
+            eps_km = st.slider("Cluster Radius (km)", 50, 1000, 200, step=50)
+        with col2:
+            min_samples = st.slider("Minimum Cluster Size", 2, 20, 5)
+        
+        # Perform clustering
+        with st.spinner("Performing clustering analysis..."):
+            gdf_clustered = perform_clustering_analysis(gdf, eps_km, min_samples)
+        
+        # Cluster statistics
+        n_clusters = len(set(gdf_clustered['cluster'])) - (1 if -1 in gdf_clustered['cluster'].values else 0)
+        n_noise = sum(gdf_clustered['cluster'] == -1)
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Clusters Found", n_clusters)
+        with col2:
+            st.metric("Clustered Points", len(gdf_clustered) - n_noise)
+        with col3:
+            st.metric("Noise Points", n_noise)
+        
+        # Display cluster map
+        cluster_map = create_cluster_map(gdf_clustered.head(1000))
+        folium_static(cluster_map, width=1200, height=600)
+        
+        # Cluster insights
+        st.markdown('<div class="insight-box">', unsafe_allow_html=True)
+        st.markdown("**Clustering Insights:**")
+        st.markdown("""
+        - **Strewn Fields**: Clusters often represent meteorite showers from single events
+        - **Collection Hotspots**: Some clusters reflect intensive collection efforts in specific regions
+        - **Geological Correlation**: Dense clusters in places like Antarctica's blue ice areas
+        - **Historical Events**: Large clusters may represent well-documented historical falls
+        """)
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    with tab3:
+        st.markdown('<div class="sub-header">Temporal Discovery Patterns</div>', unsafe_allow_html=True)
+        
+        # Create temporal analysis
+        fig, yearly_data = create_temporal_analysis(gdf)
+        
+        if fig is not None:
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Temporal insights
+            st.markdown('<div class="insight-box">', unsafe_allow_html=True)
+            st.markdown("**Temporal Insights:**")
+            st.markdown("""
+            - **Modern Discovery Boom**: Exponential increase in discoveries since 1970s due to systematic searches
+            - **Antarctica Expeditions**: Major spikes correspond to Antarctic meteorite collection programs
+            - **Technology Impact**: Satellite imagery and GPS have revolutionized meteorite hunting
+            - **Preservation Bias**: Older meteorites are underrepresented due to weathering and loss
+            """)
+            st.markdown('</div>', unsafe_allow_html=True)
+        else:
+            st.warning("Insufficient temporal data for analysis")
+    
+    with tab4:
+        st.markdown('<div class="sub-header">Continental Distribution Analysis</div>', unsafe_allow_html=True)
+        
+        # Calculate continental statistics
+        continent_stats = calculate_density_statistics(gdf)
+        
+        # Display continental breakdown
+        if not continent_stats.empty:
+            st.dataframe(continent_stats, use_container_width=True)
+            
+            # Continental distribution pie chart
+            continent_counts = gdf['continent'].value_counts()
+            
+            fig_pie = px.pie(
+                values=continent_counts.values,
+                names=continent_counts.index,
+                title="Meteorite Distribution by Continent"
+            )
+            st.plotly_chart(fig_pie, use_container_width=True)
+        
+        # Continental insights
+        st.markdown('<div class="insight-box">', unsafe_allow_html=True)
+        st.markdown("**Continental Insights:**")
+        st.markdown("""
+        - **Antarctica Dominance**: Highest density due to ideal preservation conditions and systematic collection
+        - **Desert Advantage**: Africa and Australia show high discovery rates in arid regions
+        - **Ocean Gaps**: Vast majority of ocean impacts go unrecorded
+        - **Population Effect**: Europe and North America show discovery patterns influenced by population density
+        """)
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Final story section
+    st.markdown('<div class="sub-header">🌟 The Story Meteorites Tell</div>', unsafe_allow_html=True)
+    st.markdown("""
+    The global distribution of meteorite discoveries reveals a fascinating interplay between cosmic bombardment, 
+    terrestrial processes, and human activity. While Earth receives meteorites uniformly across its surface, 
+    our ability to find and preserve them depends heavily on:
+    
+    **Environmental Factors:**
+    - Arid climates that preserve meteorites for millennia
+    - Ice fields that concentrate and preserve specimens
+    - Geological stability that prevents burial
+    
+    **Human Factors:**
+    - Population density affecting discovery likelihood
+    - Scientific expeditions to remote but promising areas
+    - Technological advances in detection and collection
+    
+    **Cosmic Insights:**
+    - Clustering patterns revealing meteorite shower events
+    - Size distributions showing asteroid breakup processes
+    - Temporal patterns reflecting both cosmic events and human discovery efforts
+    
+    This analysis demonstrates that meteorite science is as much about understanding Earth's surface processes 
+    and human exploration patterns as it is about cosmic visitors themselves.
+    """)
 
-# Predictive analytics
-st.header("🔮 Predictive Analytics")
-
-# Simple ML model for demonstration
-@st.cache_resource
-def train_model():
-    # Prepare features
-    model_df = df.copy()
-    model_df['month'] = model_df['date'].dt.month
-    model_df['day_of_year'] = model_df['date'].dt.dayofyear
-
-    features = ['temperature', 'ph', 'turbidity', 'salinity', 'dissolved_oxygen', 'month', 'day_of_year']
-    X = model_df[features]
-    y = model_df['coral_cover']
-
-    # Train model
-    scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X)
-
-    model = RandomForestRegressor(n_estimators=100, random_state=42)
-    model.fit(X_scaled, y)
-
-    return model, scaler, features
-
-model, scaler, features = train_model()
-
-st.subheader("🎯 Coral Cover Prediction")
-
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    pred_temp = st.slider("Temperature (°C)", 25.0, 35.0, 28.0, 0.1)
-    pred_ph = st.slider("pH", 7.5, 8.5, 8.1, 0.01)
-
-with col2:
-    pred_turbidity = st.slider("Turbidity (NTU)", 0.1, 10.0, 1.0, 0.1)
-    pred_salinity = st.slider("Salinity (ppt)", 30.0, 40.0, 35.0, 0.1)
-
-with col3:
-    pred_do = st.slider("Dissolved Oxygen (mg/L)", 5.0, 12.0, 8.0, 0.1)
-    pred_month = st.selectbox("Month", range(1, 13), index=5)
-
-# Make prediction
-pred_data = pd.DataFrame({
-    'temperature': [pred_temp],
-    'ph': [pred_ph],
-    'turbidity': [pred_turbidity],
-    'salinity': [pred_salinity],
-    'dissolved_oxygen': [pred_do],
-    'month': [pred_month],
-    'day_of_year': [pred_month * 30]  # Approximation
-})
-
-pred_scaled = scaler.transform(pred_data)
-prediction = model.predict(pred_scaled)[0]
-
-# Display prediction with color coding
-if prediction >= 75:
-    pred_color = "🟢"
-    pred_status = "Excellent"
-elif prediction >= 60:
-    pred_color = "🟡"
-    pred_status = "Moderate"
-else:
-    pred_color = "🔴"
-    pred_status = "Poor"
-
-st.markdown(f"""
-<div style="text-align: center; padding: 2rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 10px; color: white; margin: 1rem 0;">
-    <h2>Predicted Coral Cover</h2>
-    <h1>{pred_color} {prediction:.1f}%</h1>
-    <h3>Status: {pred_status}</h3>
-</div>
-""", unsafe_allow_html=True)
-
-# Export functionality
-st.header("📤 Data Export")
-
-col1, col2 = st.columns(2)
-
-with col1:
-    # Summary statistics
-    summary_stats = filtered_df.groupby('reef_name').agg({
-        'temperature': ['mean', 'max', 'min'],
-        'ph': ['mean', 'max', 'min'],
-        'coral_cover': ['mean', 'max', 'min'],
-        'bleaching_severity': 'max'
-    }).round(2)
-
-    csv_summary = summary_stats.to_csv()
-    st.download_button(
-        label="📊 Download Summary Statistics",
-        data=csv_summary,
-        file_name=f"coral_summary_{datetime.date.today()}.csv",
-        mime="text/csv"
-    )
-
-with col2:
-    # Full dataset
-    csv_full = filtered_df.to_csv(index=False)
-    st.download_button(
-        label="📋 Download Full Dataset",
-        data=csv_full,
-        file_name=f"coral_data_{datetime.date.today()}.csv",
-        mime="text/csv"
-    )
-
-# Footer
-st.markdown("---")
-st.markdown("""
-<div style="text-align: center; color: #6b7280; padding: 1rem;">
-    <p>🪸 <strong>CoralDash Pro</strong> | Advanced Coral Reef Monitoring Platform</p>
-    <p>Powered by AI & Machine Learning | Real-time Environmental Monitoring</p>
-</div>
-""", unsafe_allow_html=True)
+if __name__ == "__main__":
+    main()
