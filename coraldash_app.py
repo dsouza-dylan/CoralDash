@@ -116,8 +116,7 @@ def create_story_intro():
     st.markdown("""
     <div class="main-header">
         <h1>🌊 ENSOcast</h1>
-        <h3>Decoding Earth's Most Powerful Climate Pattern</h3>
-        <p>Journey through the invisible forces that shape weather across our planet</p>
+        <h3>Decoding El Niño–Southern Oscillation</h3>
     </div>
     """, unsafe_allow_html=True)
 
@@ -242,29 +241,22 @@ if not data_loaded:
     st.stop()
 
 # Sidebar with narrative navigation
-st.sidebar.markdown("""
-<div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-           padding: 1rem; border-radius: 10px; color: white; text-align: center;">
-    <h3>🧭 Your Journey</h3>
-    <p>Navigate through the ENSO story</p>
-</div>
-""", unsafe_allow_html=True)
-
+st.sidebar.title("🌊 ENSOcast")
 st.sidebar.markdown("---")
-
-# Navigation with storytelling approach
+st.sidebar.subheader("📂 Tab Navigation")
 page = st.sidebar.radio(
-    "Choose Your Path:",
-    [
-        "🌟 Start Here: Understanding ENSO",
+    "",
+    ["🌟 Start Here: Understanding ENSO",
         "🔮 The Oracle: Make Predictions",
         "📊 The Evidence: Historical Patterns",
         "🌡️ The Global View: Ocean Temperatures",
         "🔬 Behind the Scenes: Model Performance",
-        "🛠️ Experiment: Train Your Own Model"
-    ],
+        "🛠️ Experiment: Train Your Own Model"],
     index=0
 )
+st.sidebar.markdown("### ")
+st.sidebar.markdown("---")
+st.sidebar.markdown("Made by Dylan Dsouza")
 
 if page == "🌟 Start Here: Understanding ENSO":
     explain_enso_story()
@@ -452,7 +444,7 @@ elif page == "📊 The Evidence: Historical Patterns":
     """, unsafe_allow_html=True)
 
     # Interactive year selection with story
-    st.markdown("### 🕰️ Choose Your Era")
+    st.markdown("### 📊 Choose Your Era")
     years = st.slider("Explore ENSO history across decades", 1982, 2024, (2000, 2020),
                      help="Drag to select the time period you want to explore")
 
@@ -481,7 +473,7 @@ elif page == "📊 The Evidence: Historical Patterns":
 
     st.markdown(f"""
     <div class="story-card">
-        <h3>📈 Your Selected Era: {years[0]} - {years[1]}</h3>
+        <h3>🕰 Your Selected Timeline: {years[0]} - {years[1]}</h3>
         <p>In these <strong>{years_span} years</strong> ({total_months} months), here's how ENSO spent its time:</p>
     </div>
     """, unsafe_allow_html=True)
