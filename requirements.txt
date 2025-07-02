@@ -1,63 +1,18 @@
 # CoralYO - AI Coral Research Platform
-# Requirements file for Streamlit application
+# Minimal requirements for Streamlit Cloud deployment
 
-# Core Streamlit and Web Framework
-streamlit>=1.28.0
-streamlit-option-menu>=0.3.6
+# Core Framework
+streamlit
 
-# Data Processing and Analysis
-pandas>=2.0.0
-numpy>=1.24.0
-scipy>=1.10.0
+# Essential Data Processing
+pandas
+numpy
 
-# Machine Learning and AI
-tensorflow>=2.13.0
-scikit-learn>=1.3.0
-opencv-python>=4.8.0
-pillow>=10.0.0
+# Image Processing (basic)
+pillow
 
 # Visualization
-plotly>=5.15.0
-matplotlib>=3.7.0
-seaborn>=0.12.0
+plotly
 
-# Image Processing
-opencv-contrib-python>=4.8.0
-imageio>=2.31.0
-scikit-image>=0.21.0
-
-# File Handling and I/O
-openpyxl>=3.1.0
-xlsxwriter>=3.1.0
-python-dotenv>=1.0.0
-
-# Additional Utilities
-requests>=2.31.0
-urllib3>=2.0.0
-python-dateutil>=2.8.2
-pytz>=2023.3
-
-# Optional: For future ML model development
-# torch>=2.0.0
-# torchvision>=0.15.0
-# transformers>=4.30.0
-
-# Optional: For advanced image analysis
-# albumentations>=1.3.0
-# imgaug>=0.4.0
-
-# Optional: For database integration
-# sqlalchemy>=2.0.0
-# psycopg2-binary>=2.9.0
-
-# Development and Testing (optional)
-# pytest>=7.4.0
-# pytest-streamlit>=0.1.0
-# black>=23.0.0
-# flake8>=6.0.0
-
-# Note: For production deployment, consider pinning to exact versions
-# Example:
-# streamlit==1.28.1
-# pandas==2.0.3
-# etc.
+# Basic utilities that come with most Python installations
+datetime
