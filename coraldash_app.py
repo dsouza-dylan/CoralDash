@@ -1,1653 +1,612 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import cv2
+from PIL import Image
+import tensorflow as tf
+from tensorflow import keras
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-import joblib
-import xarray as xr
-import matplotlib.pyplot as plt
-import matplotlib.patches as patches
-from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
-from sklearn.model_selection import train_test_split, cross_val_score
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.svm import SVC
-from sklearn.linear_model import LogisticRegression
 import datetime
-import warnings
-warnings.filterwarnings('ignore')
+import io
+import base64
+from typing import Dict, List, Tuple, Optional
+import json
 
-# Try to import SHAP (optional dependency)
-try:
-    import shap
-    SHAP_AVAILABLE = True
-except ImportError:
-    SHAP_AVAILABLE = False
-
-# Page config with custom styling
+# Configuration
 st.set_page_config(
-    page_title="ENSOcast - Climate Storytelling",
-    page_icon="🌊",
+    page_title="CoralYO - AI Coral Research Platform",
+    page_icon="🪸",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for enhanced aesthetics
+# Custom CSS for better styling
 st.markdown("""
 <style>
-    .main-header {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 2rem;
-        border-radius: 10px;
-        color: white;
+    .main > div {
+        padding-top: 2rem;
+    }
+    .stAlert {
+        margin-top: 1rem;
+    }
+    .coral-header {
+        background: linear-gradient(90deg, #FF6B6B, #4ECDC4, #45B7D1);
+        background-size: 200% 200%;
+        animation: gradient 5s ease infinite;
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        font-size: 3rem;
+        font-weight: bold;
         text-align: center;
         margin-bottom: 2rem;
     }
-    
-    .story-card {
-        background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-        padding: 1.5rem;
-        border-radius: 15px;
-        border-left: 5px solid #667eea;
-        margin: 1rem 0;
+    @keyframes gradient {
+        0% {background-position: 0% 50%;}
+        50% {background-position: 100% 50%;}
+        100% {background-position: 0% 50%;}
     }
-    
-    .phase-card {
+    .metric-card {
+        background: white;
         padding: 1rem;
         border-radius: 10px;
-        margin: 0.5rem 0;
-        text-align: center;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        border-left: 4px solid #4ECDC4;
     }
-    
-    .el-nino { background: linear-gradient(135deg, #ff9a8b 0%, #f6416c 100%); color: white; }
-    .la-nina { background: linear-gradient(135deg, #a8edea 0%, #3b82f6 100%); color: white; }
-    .neutral { background: linear-gradient(135deg, #d299c2 0%, #fef9d3 100%); color: #333; }
-    
-    .prediction-box {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 2rem;
-        border-radius: 20px;
-        color: white;
-        text-align: center;
-        box-shadow: 0 10px 30px rgba(0,0,0,0.2);
-    }
-    
-    .insight-card {
-        background: rgba(255,255,255,0.1);
-        backdrop-filter: blur(10px);
-        padding: 1.5rem;
+    .species-tag {
+        background: #E3F2FD;
+        color: #1976D2;
+        padding: 0.25rem 0.5rem;
         border-radius: 15px;
-        border: 1px solid rgba(255,255,255,0.2);
-        margin: 1rem 0;
-    }
-    
-    .metric-container {
-        background: linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%);
-        padding: 1rem;
-        border-radius: 10px;
-        text-align: center;
-        margin: 0.5rem;
+        font-size: 0.8rem;
+        margin: 0.2rem;
+        display: inline-block;
     }
 </style>
 """, unsafe_allow_html=True)
 
-@st.cache_data
-def load_model_and_data():
-    try:
-        df = pd.read_csv("merged_enso.csv", parse_dates=["Date"])
-        model = joblib.load("enso_model_a_baseline.pkl")
-        return df, model
-    except FileNotFoundError:
-        st.error("Data files not found. Please ensure merged_enso.csv and enso_model_a_baseline.pkl are in the correct directory.")
-        return None, None
-
-@st.cache_data
-def load_sst_dataset():
-    try:
-        url = "http://psl.noaa.gov/thredds/dodsC/Datasets/noaa.oisst.v2.highres/sst.mon.mean.nc"
-        ds = xr.open_dataset(url)
-        ds["time"] = pd.to_datetime(ds["time"].values)
-        return ds
-    except:
-        st.warning("Could not connect to live SST data. Using cached data for demonstration.")
-        return None
-
-def create_story_intro():
-    st.markdown("""
-    <div class="main-header">
-        <h1>🌊 ENSOcast</h1>
-        <h3>Decoding El Niño–Southern Oscillation</h3>
-    </div>
-    """, unsafe_allow_html=True)
-
-def explain_enso_story():
-    st.markdown("""
-    <div class="story-card">
-        <h2>🌍 The Story of ENSO</h2>
-        <p>Imagine the Pacific Ocean as Earth's heartbeat. Every few years, this heartbeat changes rhythm, 
-        sending ripples of change across continents. This is ENSO - the El Niño-Southern Oscillation.</p>
+class CoralClassifier:
+    """Mock AI classifier for coral species identification and health assessment"""
+    
+    def __init__(self):
+        self.species_database = {
+            'Acropora cervicornis': {
+                'common_name': 'Staghorn Coral',
+                'family': 'Acroporidae',
+                'growth_form': 'Branching',
+                'threat_level': 'Critically Endangered',
+                'description': 'Fast-growing branching coral, critical for reef structure'
+            },
+            'Acropora palmata': {
+                'common_name': 'Elkhorn Coral',
+                'family': 'Acroporidae', 
+                'growth_form': 'Plate-like',
+                'threat_level': 'Critically Endangered',
+                'description': 'Large plate-like coral providing habitat for many species'
+            },
+            'Montastraea cavernosa': {
+                'common_name': 'Great Star Coral',
+                'family': 'Montastraeidae',
+                'growth_form': 'Massive',
+                'threat_level': 'Near Threatened',
+                'description': 'Large boulder coral with distinctive star-shaped polyps'
+            },
+            'Diploria strigosa': {
+                'common_name': 'Symmetrical Brain Coral',
+                'family': 'Mussidae',
+                'growth_form': 'Massive',
+                'threat_level': 'Near Threatened',
+                'description': 'Brain-like coral with symmetrical ridge patterns'
+            },
+            'Porites astreoides': {
+                'common_name': 'Mustard Hill Coral',
+                'family': 'Poritidae',
+                'growth_form': 'Massive',
+                'threat_level': 'Least Concern',
+                'description': 'Hardy coral with small polyps, often yellow-green'
+            }
+        }
         
-        <p>🔄 <strong>It's a conversation between ocean and atmosphere:</strong></p>
-        <ul>
-            <li>The ocean warms or cools</li>
-            <li>The atmosphere responds by shifting winds</li>
-            <li>These winds push ocean currents in new directions</li>
-            <li>Weather patterns worldwide transform</li>
-        </ul>
-    </div>
-    """, unsafe_allow_html=True)
-
-def create_phase_cards():
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-        st.markdown("""
-        <div class="phase-card el-nino">
-            <h3>🔴 El Niño</h3>
-            <p><strong>"The Little Boy"</strong></p>
-            <p>Ocean warms up<br>
-            Brings floods to some,<br>
-            droughts to others</p>
-            <small>Occurs every 2-7 years</small>
-        </div>
-        """, unsafe_allow_html=True)
-
-    with col2:
-        st.markdown("""
-        <div class="phase-card neutral">
-            <h3>⚪ Neutral</h3>
-            <p><strong>"The Quiet Phase"</strong></p>
-            <p>Ocean at normal temps<br>
-            Weather patterns<br>
-            follow usual seasons</p>
-            <small>Most common state</small>
-        </div>
-        """, unsafe_allow_html=True)
-
-    with col3:
-        st.markdown("""
-        <div class="phase-card la-nina">
-            <h3>🔵 La Niña</h3>
-            <p><strong>"The Little Girl"</strong></p>
-            <p>Ocean cools down<br>
-            Intensifies hurricanes,<br>
-            brings extreme weather</p>
-            <small>Often follows El Niño</small>
-        </div>
-        """, unsafe_allow_html=True)
-
-def create_feature_for_date(target_date, df, feature_cols):
-    """Create features for a specific date based on historical patterns"""
-    if isinstance(target_date, str):
-        target_date = pd.to_datetime(target_date)
-    elif isinstance(target_date, datetime.date):
-        target_date = pd.Timestamp(target_date)
-
-    df_sorted = df.sort_values('Date')
-    time_diffs = (df_sorted['Date'] - target_date).dt.days.abs()
-    closest_idx = time_diffs.idxmin()
-    closest_position = df_sorted.index.get_loc(closest_idx)
-
-    month = target_date.month
-    month_sin = np.sin(2 * np.pi * month / 12)
-    month_cos = np.cos(2 * np.pi * month / 12)
-
-    start_idx = max(0, closest_position - 12)
-    end_idx = closest_position + 1
-    recent_data = df_sorted.iloc[start_idx:end_idx]
-
-    if len(recent_data) == 0:
-        feature_values = df[feature_cols].mean()
-    else:
-        feature_values = recent_data[feature_cols].mean()
-
-    if 'month_sin' in feature_cols:
-        feature_values['month_sin'] = month_sin
-    if 'month_cos' in feature_cols:
-        feature_values['month_cos'] = month_cos
-
-    return feature_values.values.reshape(1, -1)
-
-# Load data with error handling
-data_loaded = True
-try:
-    df, model = load_model_and_data()
-    if df is None or model is None:
-        data_loaded = False
-    else:
-        sst_ds = load_sst_dataset()
-
-        feature_cols = [
-            "SST_Anomaly", "SOI", "SOI_lag_1", "SOI_lag_2", "SOI_lag_3",
-            "SST_Anomaly_lag_1", "SST_Anomaly_lag_2", "SST_Anomaly_lag_3",
-            "month_sin", "month_cos"
-        ]
-        X = df[feature_cols]
-        y_true = df["ENSO_Label"]
-        y_pred = model.predict(X)
-
-        label_map = {0: "La Niña", 1: "Neutral", 2: "El Niño"}
-        df["Predicted_Phase"] = [label_map[i] for i in y_pred]
-        df["True_Phase"] = [label_map[i] for i in y_true]
-except Exception as e:
-    st.error(f"Error loading data: {e}")
-    data_loaded = False
-
-# Create the storytelling interface
-create_story_intro()
-
-if not data_loaded:
-    st.error("⚠️ Unable to load required data files. Please check your setup.")
-    st.stop()
-
-# Sidebar with narrative navigation
-st.sidebar.title("🌊 ENSOcast")
-st.sidebar.markdown("---")
-st.sidebar.subheader("📂 Tab Navigation")
-page = st.sidebar.radio(
-    "",
-    ["🌟 Start Here: Understanding ENSO",
-        "🔮 The Oracle: Make Predictions",
-        "📊 The Evidence: Historical Patterns",
-        "🌡️ The Global View: Ocean Temperatures",
-        "🔬 Behind the Scenes: Model Performance",
-        "🛠️ Experiment: Train Your Own Model",
-        "🌡 Global SST Snapshot",
-        "📈 Historical Trends",
-        "🔮 Advanced Predictions",
-        "🛠 Custom Model Training"],
-    index=0
-)
-st.sidebar.markdown("### ")
-st.sidebar.markdown("---")
-st.sidebar.markdown("Made by Dylan Dsouza")
-
-if page == "🌟 Start Here: Understanding ENSO":
-    explain_enso_story()
-
-    st.markdown("### 🎭 Meet the Three Characters")
-    create_phase_cards()
-
-    st.markdown("""
-    <div class="story-card">
-        <h3>🎯 Why Does This Matter?</h3>
-        <p>ENSO affects:</p>
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-top: 1rem;">
-            <div style="background: #ff6b6b; color: white; padding: 1rem; border-radius: 8px; text-align: center;">
-                <h4>🌾 Agriculture</h4>
-                <p>Crop yields, drought, floods</p>
-            </div>
-            <div style="background: #4ecdc4; color: white; padding: 1rem; border-radius: 8px; text-align: center;">
-                <h4>🌪️ Weather</h4>
-                <p>Hurricanes, storms, rainfall</p>
-            </div>
-            <div style="background: #45b7d1; color: white; padding: 1rem; border-radius: 8px; text-align: center;">
-                <h4>💰 Economy</h4>
-                <p>Energy costs, insurance, trade</p>
-            </div>
-            <div style="background: #f9ca24; color: white; padding: 1rem; border-radius: 8px; text-align: center;">
-                <h4>🌊 Marine Life</h4>
-                <p>Fish populations, coral health</p>
-            </div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # Recent ENSO timeline
-    st.markdown("### 📅 ENSO's Recent Journey")
-    recent_data = df[df["Date"] >= (df["Date"].max() - pd.DateOffset(years=5))].copy()
-
-    fig = px.line(recent_data, x="Date", y="ONI",
-                  title="Oceanic Niño Index - The Last 5 Years",
-                  color_discrete_sequence=['#667eea'])
-
-    fig.add_hline(y=0.5, line_dash="dash", line_color="red",
-                  annotation_text="El Niño Threshold", annotation_position="top right")
-    fig.add_hline(y=-0.5, line_dash="dash", line_color="blue",
-                  annotation_text="La Niña Threshold", annotation_position="bottom right")
-
-    # Add shaded regions
-    fig.add_hrect(y0=0.5, y1=3, fillcolor="red", opacity=0.1, line_width=0)
-    fig.add_hrect(y0=-3, y1=-0.5, fillcolor="blue", opacity=0.1, line_width=0)
-
-    fig.update_layout(height=400, template="plotly_white")
-    st.plotly_chart(fig, use_container_width=True)
-
-    st.markdown("""
-    <div class="insight-card">
-        <p>📈 <strong>Reading the story:</strong> When the line goes above +0.5, it's El Niño territory (red zone). 
-        Below -0.5 means La Niña conditions (blue zone). The line tells the story of ocean temperature changes!</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-elif page == "🔮 The Oracle: Make Predictions":
-    st.markdown("""
-    <div class="story-card">
-        <h2>🔮 The ENSO Oracle</h2>
-        <p>Step into the role of a climate prophet. Our AI has studied decades of ocean and atmospheric data 
-        to peer into the future. What will the Pacific Ocean whisper about the months ahead?</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # Enhanced prediction interface
-    st.markdown("### 🎯 Cast Your Prediction")
-
-    col1, col2 = st.columns([1, 1])
-    with col1:
-        target_year = st.number_input("🗓️ Which year calls to you?",
-                                     min_value=1982, max_value=2030, value=2024,
-                                     help="Choose any year from 1982 to 2030")
-
-    with col2:
-        target_month = st.selectbox("🌙 Which month holds the mystery?", [
-            "January", "February", "March", "April", "May", "June",
-            "July", "August", "September", "October", "November", "December"
-        ], index=datetime.datetime.now().month-1)
-
-    predict_button = st.button("🔮 Reveal the Future", type="primary", use_container_width=True)
-
-    if predict_button:
-        month_num = {
-            "January": 1, "February": 2, "March": 3, "April": 4, "May": 5, "June": 6,
-            "July": 7, "August": 8, "September": 9, "October": 10, "November": 11, "December": 12
-        }[target_month]
-
-        target_date = datetime.date(target_year, month_num, 1)
-
-        with st.spinner("🌊 The ocean spirits are consulting... Reading the signs..."):
-            try:
-                X_target = create_feature_for_date(target_date, df, feature_cols)
-                prediction = model.predict(X_target)[0]
-                probabilities = model.predict_proba(X_target)[0]
-
-                predicted_phase = label_map[prediction]
-                max_prob = max(probabilities)
-
-                # Dramatic reveal
-                st.balloons()
-
-                if predicted_phase == "El Niño":
-                    st.markdown(f"""
-                    <div class="prediction-box" style="background: linear-gradient(135deg, #ff9a8b 0%, #f6416c 100%);">
-                        <h1>🔴 El Niño Awakens</h1>
-                        <h3>For {target_month} {target_year}</h3>
-                        <p style="font-size: 1.2em;">The ocean will run warm with El Niño's fire. 
-                        Expect the unexpected - flooding rains in some lands, drought in others.</p>
-                        <p><strong>Oracle's Confidence:</strong> {max_prob:.1%}</p>
-                    </div>
-                    """, unsafe_allow_html=True)
-
-                elif predicted_phase == "La Niña":
-                    st.markdown(f"""
-                    <div class="prediction-box" style="background: linear-gradient(135deg, #a8edea 0%, #3b82f6 100%);">
-                        <h1>🔵 La Niña's Cool Embrace</h1>
-                        <h3>For {target_month} {target_year}</h3>
-                        <p style="font-size: 1.2em;">The ocean will run cold under La Niña's influence. 
-                        Hurricanes may dance with greater fury, and weather patterns will intensify.</p>
-                        <p><strong>Oracle's Confidence:</strong> {max_prob:.1%}</p>
-                    </div>
-                    """, unsafe_allow_html=True)
-
-                else:
-                    st.markdown(f"""
-                    <div class="prediction-box" style="background: linear-gradient(135deg, #d299c2 0%, #fef9d3 100%); color: #333;">
-                        <h1>⚪ The Neutral Path</h1>
-                        <h3>For {target_month} {target_year}</h3>
-                        <p style="font-size: 1.2em;">The ocean rests in balance. Weather patterns will follow 
-                        their seasonal rhythms without dramatic shifts.</p>
-                        <p><strong>Oracle's Confidence:</strong> {max_prob:.1%}</p>
-                    </div>
-                    """, unsafe_allow_html=True)
-
-                st.markdown("### 🎲 The Full Prophecy")
-
-                # Probability visualization
-                prob_data = pd.DataFrame({
-                    'Phase': ['🔵 La Niña', '⚪ Neutral', '🔴 El Niño'],
-                    'Probability': probabilities,
-                    'Colors': ['#3b82f6', '#94a3b8', '#f6416c']
-                })
-
-                fig = px.bar(prob_data, x='Phase', y='Probability',
-                           color='Colors', color_discrete_map='identity',
-                           title="The Oracle's Vision - Detailed Probabilities")
-                fig.update_layout(showlegend=False, template="plotly_white")
-                fig.update_yaxis(title="Probability", tickformat='.0%')
-
-                st.plotly_chart(fig, use_container_width=True)
-
-                # Confidence interpretation
-                if max_prob > 0.8:
-                    confidence_story = "🎯 **Crystal Clear Vision** - The signs are unmistakable"
-                elif max_prob > 0.6:
-                    confidence_story = "👁️ **Strong Intuition** - The patterns point clearly in one direction"
-                elif max_prob > 0.4:
-                    confidence_story = "🤔 **Clouded Vision** - The future remains uncertain, multiple paths possible"
-                else:
-                    confidence_story = "🌫️ **Misty Prophecy** - The ocean spirits are conflicted"
-
-                st.markdown(f"""
-                <div class="insight-card">
-                    {confidence_story}
-                    <br><br>
-                    <em>"The further we peer into time's river, the murkier the waters become. 
-                    Use this wisdom as a guide, not gospel."</em>
-                </div>
-                """, unsafe_allow_html=True)
-
-            except Exception as e:
-                st.error(f"❌ The oracle's vision is clouded: {e}")
-
-elif page == "📊 The Evidence: Historical Patterns":
-    st.markdown("""
-    <div class="story-card">
-        <h2>📊 Chronicles of the Past</h2>
-        <p>Every climate prediction is built on the foundation of history. Let's explore the patterns 
-        hidden in decades of data - the rhythm of ENSO through time.</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # Interactive year selection with story
-    st.markdown("### 📊 Choose Your Era")
-    years = st.slider("Explore ENSO history across decades", 1982, 2024, (2000, 2020),
-                     help="Drag to select the time period you want to explore")
-
-    selected_phases = st.multiselect(
-        "Which characters in the ENSO story interest you?",
-        ["La Niña", "Neutral", "El Niño"],
-        default=["La Niña", "Neutral", "El Niño"],
-        help="Select which ENSO phases to include in your analysis"
-    )
-
-    # Filter data
-    df_filtered = df[
-        (df["Date"].dt.year >= years[0]) &
-        (df["Date"].dt.year <= years[1]) &
-        (df["ENSO_Phase"].isin(selected_phases))
-    ]
-
-    if len(df_filtered) == 0:
-        st.warning("No data available for your selected criteria. Try adjusting your filters.")
-        st.stop()
-
-    # Key statistics in narrative form
-    phase_counts = df_filtered["ENSO_Phase"].value_counts()
-    total_months = len(df_filtered)
-    years_span = years[1] - years[0] + 1
-
-    st.markdown(f"""
-    <div class="story-card">
-        <h3>🕰 Your Selected Timeline: {years[0]} - {years[1]}</h3>
-        <p>In these <strong>{years_span} years</strong> ({total_months} months), here's how ENSO spent its time:</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # Phase distribution with enhanced visuals
-    col1, col2, col3 = st.columns(3)
-    for i, (phase, count) in enumerate(phase_counts.items()):
-        percentage = (count / total_months) * 100
-        color = "#f6416c" if phase == "El Niño" else "#3b82f6" if phase == "La Niña" else "#94a3b8"
-        emoji = "🔴" if phase == "El Niño" else "🔵" if phase == "La Niña" else "⚪"
-
-        if i == 0:
-            col = col1
-        elif i == 1:
-            col = col2
-        else:
-            col = col3
-
-        with col:
-            st.markdown(f"""
-            <div class="metric-container" style="background: linear-gradient(135deg, {color}20, {color}40);">
-                <h2>{emoji} {phase}</h2>
-                <h3>{count} months</h3>
-                <p>{percentage:.1f}% of the time</p>
-            </div>
-            """, unsafe_allow_html=True)
-
-    # Enhanced timeline visualizations
-    st.markdown("### 🌊 The Ocean's Temperature Story")
-
-    # SST Timeline with narrative
-    fig = make_subplots(specs=[[{"secondary_y": True}]])
-
-    fig.add_trace(
-        go.Scatter(
-            x=df_filtered["Date"],
-            y=df_filtered["SST"],
-            name="Ocean Temperature",
-            line=dict(color='#ff6b6b', width=2),
-            hovertemplate="<b>%{x}</b><br>Temperature: %{y:.2f}°C<extra></extra>"
-        ),
-        secondary_y=False,
-    )
-
-    fig.add_trace(
-        go.Scatter(
-            x=df_filtered["Date"],
-            y=df_filtered["SST_Climatology"],
-            name="Expected Temperature",
-            line=dict(color='#4ecdc4', dash='dot', width=2),
-            hovertemplate="<b>%{x}</b><br>Expected: %{y:.2f}°C<extra></extra>"
-        ),
-        secondary_y=False,
-    )
-
-    fig.update_layout(
-        title="The Pacific's Temperature Dance",
-        xaxis_title="Time",
-        template="plotly_white",
-        height=400,
-        hovermode='x unified',
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-    )
-
-    fig.update_yaxes(title_text="Sea Surface Temperature (°C)", secondary_y=False)
-
-    st.plotly_chart(fig, use_container_width=True)
-
-    st.markdown("""
-    <div class="insight-card">
-        <p>🌡️ <strong>Temperature tells the tale:</strong> When the red line rises above the blue dotted line, 
-        El Niño is stirring. When it falls below, La Niña is taking hold.</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # ENSO Phase Timeline
-    st.markdown("### 🎭 The Three-Act Drama")
-
-    # Create phase timeline
-    phase_numeric = df_filtered["ENSO_Phase"].map({"La Niña": -1, "Neutral": 0, "El Niño": 1})
-
-    fig_phases = go.Figure()
-
-    # Color mapping for phases
-    colors = {"La Niña": "#3b82f6", "Neutral": "#94a3b8", "El Niño": "#f6416c"}
-
-    for phase in df_filtered["ENSO_Phase"].unique():
-        phase_data = df_filtered[df_filtered["ENSO_Phase"] == phase]
-        phase_values = phase_data["ENSO_Phase"].map({"La Niña": -1, "Neutral": 0, "El Niño": 1})
-
-        fig_phases.add_trace(go.Scatter(
-            x=phase_data["Date"],
-            y=phase_values,
-            mode='markers',
-            name=f"{phase}",
-            marker=dict(color=colors[phase], size=8, opacity=0.7),
-            hovertemplate=f"<b>{phase}</b><br>%{{x}}<extra></extra>"
-        ))
-
-    fig_phases.update_layout(
-        title="ENSO's Dramatic Timeline",
-        xaxis_title="Time",
-        yaxis=dict(
-            tickmode='array',
-            tickvals=[-1, 0, 1],
-            ticktext=['🔵 La Niña', '⚪ Neutral', '🔴 El Niño']
-        ),
-        template="plotly_white",
-        height=300,
-        showlegend=True
-    )
-
-    st.plotly_chart(fig_phases, use_container_width=True)
-
-    # Advanced pattern analysis
-    st.markdown("### 🔍 Hidden Patterns Revealed")
-
-    # Seasonal analysis
-    df_filtered['Month'] = df_filtered['Date'].dt.month
-    seasonal_patterns = df_filtered.groupby(['Month', 'ENSO_Phase']).size().unstack(fill_value=0)
-
-    fig_seasonal = px.bar(
-        seasonal_patterns.reset_index().melt(id_vars='Month', var_name='Phase', value_name='Count'),
-        x='Month', y='Count', color='Phase',
-        title="When Do Different ENSO Phases Prefer to Appear?",
-        color_discrete_map=colors
-    )
-
-    fig_seasonal.update_xaxes(
-        tickmode='array',
-        tickvals=list(range(1, 13)),
-        ticktext=['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-                 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-    )
-
-    st.plotly_chart(fig_seasonal, use_container_width=True)
-
-    st.markdown("""
-    <div class="insight-card">
-        <p>📅 <strong>Seasonal Secrets:</strong> ENSO phases have favorite seasons! Notice how some phases 
-        appear more often in certain months - this is one of the patterns our prediction model learned.</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-elif page == "🌡️ The Global View: Ocean Temperatures":
-    st.markdown("""
-    <div class="story-card">
-        <h2>🌡️ The Global Ocean's Portrait</h2>
-        <p>Witness the Pacific Ocean as seen from space - a living, breathing entity whose temperature patterns 
-        tell the story of global climate. The Niño 3.4 region (our black box) is ENSO's heartbeat.</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # Enhanced date selection
-    col1, col2 = st.columns(2)
-    with col1:
-        selected_year = st.slider("🗓️ Journey through time", min_value=1982, max_value=2024, value=2010)
-    with col2:
-        month_dict = {
-            "January": 1, "February": 2, "March": 3, "April": 4,
-            "May": 5, "June": 6, "July": 7, "August": 8,
-            "September": 9, "October": 10, "November": 11, "December": 12
+        self.health_indicators = {
+            'healthy': {'color': '#00C851', 'description': 'Normal coloration and polyp extension'},
+            'stressed': {'color': '#FF8800', 'description': 'Pale coloration, possible environmental stress'},
+            'bleached': {'color': '#FF4444', 'description': 'White/pale, symbiotic algae loss'},
+            'diseased': {'color': '#AA00FF', 'description': 'Tissue necrosis or disease signs'},
+            'dead': {'color': '#666666', 'description': 'No living tissue, algae-covered skeleton'}
         }
-        selected_month = st.selectbox("🌙 Choose your window into the ocean",
-                                    list(month_dict.keys()), index=7)
-
-    month_num = month_dict[selected_month]
-
-    # Historical context for selected date
-    if selected_year >= 2015:
-        era_story = "🌊 **Modern Era** - Recent climate patterns with enhanced monitoring"
-    elif selected_year >= 2000:
-        era_story = "📡 **Satellite Age** - High-resolution ocean observations"
-    elif selected_year >= 1990:
-        era_story = "🔬 **Scientific Revolution** - ENSO understanding deepened"
-    else:
-        era_story = "🗿 **Early Records** - Foundation of climate science"
-
-    st.markdown(f"""
-    <div class="insight-card">
-        <h4>{selected_month} {selected_year}</h4>
-        <p>{era_story}</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # SST visualization with enhanced storytelling
-    if sst_ds is not None:
-        try:
-            with st.spinner(f"🛰️ Downloading satellite data for {selected_month} {selected_year}..."):
-                sst_slice = sst_ds.sel(time=(sst_ds['time.year'] == selected_year) &
-                                     (sst_ds['time.month'] == month_num))['sst']
-
-                fig, ax = plt.subplots(figsize=(15, 8))
-
-                # Enhanced colormap and styling
-                im = sst_slice.plot(ax=ax, cmap='RdYlBu_r',
-                                  cbar_kwargs={"label": "Sea Surface Temperature (°C)", "shrink": 0.8})
-
-                # Highlight Niño 3.4 region with enhanced styling
-                nino_rect = patches.Rectangle((190, -5), 50, 10,
-                                            edgecolor='black', facecolor='none',
-                                            linewidth=3, linestyle='--')
-                ax.add_patch(nino_rect)
-
-                # Add annotations
-                ax.text(215, 8, '🎯 Niño 3.4 Region\n(ENSO\'s Heartbeat)',
-                       ha='center', va='bottom', fontsize=12, fontweight='bold',
-                       bbox=dict(boxstyle="round,pad=0.3", facecolor='white', alpha=0.8))
-
-                ax.set_title(f'🌊 Pacific Ocean Temperature Portrait - {selected_month} {selected_year}',
-                           fontsize=16, fontweight='bold', pad=20)
-                ax.set_xlabel("Longitude (°E)", fontsize=12)
-                ax.set_ylabel("Latitude (°N)", fontsize=12)
-
-                # Add temperature context
-                avg_temp = float(sst_slice.mean())
-                max_temp = float(sst_slice.max())
-                min_temp = float(sst_slice.min())
-
-                st.pyplot(fig)
-
-                # Temperature insights
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.markdown(f"""
-                    <div class="metric-container">
-                        <h3>🌡️ Average</h3>
-                        <h2>{avg_temp:.1f}°C</h2>
-                    </div>
-                    """, unsafe_allow_html=True)
-                with col2:
-                    st.markdown(f"""
-                    <div class="metric-container">
-                        <h3>🔥 Hottest</h3>
-                        <h2>{max_temp:.1f}°C</h2>
-                    </div>
-                    """, unsafe_allow_html=True)
-                with col3:
-                    st.markdown(f"""
-                    <div class="metric-container">
-                        <h3>🧊 Coolest</h3>
-                        <h2>{min_temp:.1f}°C</h2>
-                    </div>
-                    """, unsafe_allow_html=True)
-
-                # ENSO context for this specific date
-                date_context = df[df['Date'].dt.year == selected_year]
-                if len(date_context) > 0:
-                    monthly_data = date_context[date_context['Date'].dt.month == month_num]
-                    if len(monthly_data) > 0:
-                        phase = monthly_data.iloc[0]['ENSO_Phase']
-                        oni_value = monthly_data.iloc[0]['ONI']
-
-                        phase_colors = {"El Niño": "#f6416c", "La Niña": "#3b82f6", "Neutral": "#94a3b8"}
-                        phase_emojis = {"El Niño": "🔴", "La Niña": "🔵", "Neutral": "⚪"}
-
-                        st.markdown(f"""
-                        <div class="insight-card" style="background: {phase_colors[phase]}20;">
-                            <h3>{phase_emojis[phase]} {selected_month} {selected_year} was a <strong>{phase}</strong> month</h3>
-                            <p>ONI Value: <strong>{oni_value:.2f}</strong></p>
-                            <p>This ocean temperature pattern was {'typical' if phase == 'Neutral' else 'influenced by ' + phase + ' conditions'}.</p>
-                        </div>
-                        """, unsafe_allow_html=True)
-
-        except Exception as e:
-            st.error(f"🌊 Unable to load ocean data for {selected_month} {selected_year}: {e}")
-            st.info("💡 Try selecting a different date, or check your internet connection for satellite data.")
-    else:
-        st.warning("🛰️ Live satellite data unavailable. Here's what you would see:")
-        st.markdown("""
-        <div class="story-card">
-            <h3>🌊 Ocean Temperature Visualization</h3>
-            <p>Normally, you'd see a colorful map of the Pacific Ocean where:</p>
-            <ul>
-                <li>🔴 <strong>Red/Yellow areas</strong> show warmer waters (El Niño influence)</li>
-                <li>🔵 <strong>Blue areas</strong> show cooler waters (La Niña influence)</li>
-                <li>🎯 <strong>The black box</strong> highlights the Niño 3.4 region - ENSO's control center</li>
-                <li>🌡️ <strong>Temperature gradients</strong> reveal the ocean's story</li>
-            </ul>
-            <p>This satellite view helps scientists understand how ENSO affects global weather patterns.</p>
-        </div>
-        """, unsafe_allow_html=True)
-
-elif page == "🔬 Behind the Scenes: Model Performance":
-    st.markdown("""
-    <div class="story-card">
-        <h2>🔬 The Science Behind the Oracle</h2>
-        <p>Every prediction has a story of how it was made. Let's peek behind the curtain at our AI model - 
-        its successes, its struggles, and what makes it tick.</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # Model performance metrics with storytelling
-    accuracy = accuracy_score(df["True_Phase"], df["Predicted_Phase"])
-
-    st.markdown("### 🎯 The Report Card")
-
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.markdown(f"""
-        <div class="metric-container">
-            <h3>🎯 Overall Accuracy</h3>
-            <h2>{accuracy:.0%}</h2>
-            <p>Correct predictions</p>
-        </div>
-        """, unsafe_allow_html=True)
-
-    with col2:
-        total_predictions = len(df)
-        correct_predictions = int(accuracy * total_predictions)
-        st.markdown(f"""
-        <div class="metric-container">
-            <h3>📊 Total Tested</h3>
-            <h2>{total_predictions:,}</h2>
-            <p>Months analyzed</p>
-        </div>
-        """, unsafe_allow_html=True)
-
-    with col3:
-        st.markdown(f"""
-        <div class="metric-container">
-            <h3>✅ Success Stories</h3>
-            <h2>{correct_predictions:,}</h2>
-            <p>Months predicted correctly</p>
-        </div>
-        """, unsafe_allow_html=True)
-
-    # Performance story
-    if accuracy > 0.8:
-        performance_story = "🌟 **Excellent Performance** - Our model is a skilled climate detective!"
-    elif accuracy > 0.7:
-        performance_story = "👍 **Good Performance** - Reliable predictions with room for improvement"
-    elif accuracy > 0.6:
-        performance_story = "🤔 **Moderate Performance** - Better than guessing, but climate is complex"
-    else:
-        performance_story = "🔧 **Needs Improvement** - Climate prediction remains challenging"
-
-    st.markdown(f"""
-    <div class="insight-card">
-        <h3>{performance_story}</h3>
-        <p>Out of {total_predictions:,} months of historical data, our AI correctly identified the ENSO phase 
-        {correct_predictions:,} times. That means it was right {accuracy:.0%} of the time!</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # Detailed performance breakdown
-    st.markdown("### 📋 The Detailed Scorecard")
-
-    # Classification report in a more narrative format
-    report = classification_report(df["True_Phase"], df["Predicted_Phase"], output_dict=True)
-
-    phases = ["La Niña", "Neutral", "El Niño"]
-    phase_emojis = {"La Niña": "🔵", "Neutral": "⚪", "El Niño": "🔴"}
-
-    for phase in phases:
-        if phase in report:
-            precision = report[phase]['precision']
-            recall = report[phase]['recall']
-            f1 = report[phase]['f1-score']
-            support = int(report[phase]['support'])
-
-            st.markdown(f"""
-            <div class="insight-card">
-                <h4>{phase_emojis[phase]} {phase} Performance</h4>
-                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem;">
-                    <div>
-                        <strong>Precision:</strong> {precision:.0%}<br>
-                        <small>When model says "{phase}", it's right {precision:.0%} of the time</small>
-                    </div>
-                    <div>
-                        <strong>Recall:</strong> {recall:.0%}<br>
-                        <small>Model catches {recall:.0%} of actual {phase} events</small>
-                    </div>
-                    <div>
-                        <strong>F1-Score:</strong> {f1:.0%}<br>
-                        <small>Balanced performance measure</small>
-                    </div>
-                    <div>
-                        <strong>Sample Size:</strong> {support}<br>
-                        <small>Months of {phase} in our data</small>
-                    </div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-
-    # Confusion matrix as a story
-    st.markdown("### 🤷 Where the Model Gets Confused")
-
-    cm = confusion_matrix(df["True_Phase"], df["Predicted_Phase"], labels=["La Niña", "Neutral", "El Niño"])
-
-    # Create a heatmap-style visualization
-    fig_cm = px.imshow(cm,
-                       labels=dict(x="Predicted Phase", y="Actual Phase", color="Count"),
-                       x=["🔵 La Niña", "⚪ Neutral", "🔴 El Niño"],
-                       y=["🔵 La Niña", "⚪ Neutral", "🔴 El Niño"],
-                       color_continuous_scale="Blues",
-                       title="Confusion Matrix: Where Predictions Go Wrong")
-
-    # Add text annotations
-    for i in range(len(cm)):
-        for j in range(len(cm[i])):
-            fig_cm.add_annotation(x=j, y=i, text=str(cm[i][j]),
-                                showarrow=False, font_size=16, font_color="white" if cm[i][j] > cm.max()/2 else "black")
-
-    st.plotly_chart(fig_cm, use_container_width=True)
-
-    st.markdown("""
-    <div class="insight-card">
-        <p>📊 <strong>Reading the confusion:</strong> The diagonal shows correct predictions (darker = better). 
-        Off-diagonal squares show mistakes - when the model confused one phase for another.</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # Feature importance story
-    st.markdown("### 🔍 What the Model Pays Attention To")
-
-    if hasattr(model, 'feature_importances_'):
-        importance_df = pd.DataFrame({
-            "Feature": feature_cols,
-            "Importance": model.feature_importances_
-        }).sort_values("Importance", ascending=True)
-
-        # Create feature importance with descriptions
-        feature_descriptions = {
-            "SST_Anomaly": "🌡️ Current ocean temperature difference",
-            "SOI": "🌬️ Current atmospheric pressure pattern",
-            "SOI_lag_1": "🌬️ Last month's atmospheric pressure",
-            "SOI_lag_2": "🌬️ Two months ago atmospheric pressure",
-            "SOI_lag_3": "🌬️ Three months ago atmospheric pressure",
-            "SST_Anomaly_lag_1": "🌡️ Last month's ocean temperature",
-            "SST_Anomaly_lag_2": "🌡️ Two months ago ocean temperature",
-            "SST_Anomaly_lag_3": "🌡️ Three months ago ocean temperature",
-            "month_sin": "📅 Seasonal pattern (sine)",
-            "month_cos": "📅 Seasonal pattern (cosine)"
+    
+    def identify_species(self, image: np.ndarray) -> Dict:
+        """Mock species identification - in reality would use trained CNN model"""
+        # Simulate AI processing
+        species_list = list(self.species_database.keys())
+        # Mock confidence scores
+        confidences = np.random.dirichlet(np.ones(len(species_list)) * 0.5)
+        predicted_species = species_list[np.argmax(confidences)]
+        
+        return {
+            'predicted_species': predicted_species,
+            'confidence': float(np.max(confidences)),
+            'all_predictions': {species: float(conf) for species, conf in zip(species_list, confidences)},
+            'species_info': self.species_database[predicted_species]
         }
-
-        fig_importance = px.bar(importance_df, y="Feature", x="Importance",
-                              orientation="h", title="The Model's Decision Factors")
-        fig_importance.update_layout(height=500)
-
-        st.plotly_chart(fig_importance, use_container_width=True)
-
-        # Top 3 features explanation
-        top_features = importance_df.tail(3)
-        st.markdown("### 🏆 The Top 3 Decision Makers")
-
-        for i, (_, row) in enumerate(top_features.iterrows()):
-            feature = row['Feature']
-            importance = row['Importance']
-            rank = ["🥉 Third", "🥈 Second", "🥇 First"][i]
-
-            st.markdown(f"""
-            <div class="insight-card">
-                <h4>{rank} Most Important: {feature_descriptions.get(feature, feature)}</h4>
-                <p>Influence Score: <strong>{importance:.1%}</strong></p>
-                <p>This factor accounts for {importance:.1%} of the model's decision-making process.</p>
-            </div>
-            """, unsafe_allow_html=True)
-
-    # Model limitations and honesty
-    st.markdown("### 🚧 The Model's Limitations")
-    st.markdown("""
-    <div class="story-card">
-        <h4>🤖 What Our AI Can and Cannot Do</h4>
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem;">
-            <div>
-                <h5>✅ Strengths</h5>
-                <ul>
-                    <li>Learns from decades of data</li>
-                    <li>Considers multiple climate factors</li>
-                    <li>Provides probability estimates</li>
-                    <li>Fast and consistent predictions</li>
-                </ul>
-            </div>
-            <div>
-                <h5>⚠️ Limitations</h5>
-                <ul>
-                    <li>Climate is inherently unpredictable</li>
-                    <li>Rare events are hard to forecast</li>
-                    <li>Models can't capture everything</li>
-                    <li>Accuracy decreases with time</li>
-                </ul>
-            </div>
-        </div>
-        <p><em>💡 Remember: Even the best climate models are tools to help us understand probabilities, not crystal balls that guarantee the future.</em></p>
-    </div>
-    """, unsafe_allow_html=True)
-
-elif page == "🛠️ Experiment: Train Your Own Model":
-    st.markdown("""
-    <div class="story-card">
-        <h2>🛠️ Become a Climate AI Trainer</h2>
-        <p>Ready to train your own ENSO prediction model? Choose your data, pick your algorithm, 
-        and see how different approaches perform. This is where science meets experimentation!</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # Interactive model building
-    st.markdown("### 🎛️ Design Your Experiment")
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.markdown("#### 📅 Choose Your Training Period")
-        years = st.slider("Select years for training", 1982, 2024, (2000, 2020),
-                         help="More years = more data to learn from")
-
-        st.markdown("#### 🎭 Focus on Specific Phases")
-        selected_phases = st.multiselect(
-            "Which ENSO phases to include?",
-            ["La Niña", "Neutral", "El Niño"],
-            default=["La Niña", "Neutral", "El Niño"],
-            help="You can focus on specific phases to see how models handle them"
-        )
-
-    with col2:
-        st.markdown("#### 🤖 Choose Your AI Algorithm")
-        classifier_options = {
-            "Random Forest": "🌳 Uses many decision trees - good for complex patterns",
-            "Support Vector Machine": "📐 Finds optimal boundaries - good for clear separations",
-            "Logistic Regression": "📊 Simple linear approach - fast and interpretable"
+    
+    def assess_health(self, image: np.ndarray) -> Dict:
+        """Mock health assessment - would use trained model for health indicators"""
+        # Simulate health analysis
+        health_states = list(self.health_indicators.keys())
+        health_probs = np.random.dirichlet(np.ones(len(health_states)) * 0.3)
+        predicted_health = health_states[np.argmax(health_probs)]
+        
+        # Mock additional metrics
+        coverage_percent = np.random.uniform(20, 95)
+        polyp_density = np.random.uniform(50, 200)
+        tissue_thickness = np.random.uniform(0.5, 3.0)
+        
+        return {
+            'health_status': predicted_health,
+            'confidence': float(np.max(health_probs)),
+            'health_probabilities': {state: float(prob) for state, prob in zip(health_states, health_probs)},
+            'coverage_percent': coverage_percent,
+            'polyp_density_per_cm2': polyp_density,
+            'tissue_thickness_mm': tissue_thickness,
+            'color_info': self.health_indicators[predicted_health]
         }
+    
+    def get_research_insights(self, species: str, health_status: str) -> List[str]:
+        """Generate research insights based on identification and health assessment"""
+        insights = []
+        
+        if species in self.species_database:
+            species_info = self.species_database[species]
+            
+            if species_info['threat_level'] == 'Critically Endangered':
+                insights.append(f"⚠️ {species} is critically endangered - document location for conservation efforts")
+            
+            if health_status == 'bleached' and species_info['growth_form'] == 'Branching':
+                insights.append("🌡️ Branching corals are highly susceptible to thermal stress - check water temperature")
+            
+            if health_status == 'healthy' and species_info['threat_level'] != 'Least Concern':
+                insights.append("✅ Healthy specimen of threatened species - ideal for genetic sampling")
+        
+        return insights
 
-        selected_classifier = st.selectbox(
-            "Pick your AI algorithm:",
-            list(classifier_options.keys()),
-            help="Each algorithm has different strengths"
-        )
-
-        st.markdown(f"""
-        <div class="insight-card">
-            <p>{classifier_options[selected_classifier]}</p>
-        </div>
-        """, unsafe_allow_html=True)
-
-    # Train button
-    if st.button("🚀 Train Your Model", type="primary", use_container_width=True):
-
-        # Filter data based on selections
-        filtered_df = df[
-            (df["Date"].dt.year >= years[0]) &
-            (df["Date"].dt.year <= years[1]) &
-            (df["True_Phase"].isin(selected_phases))
-        ]
-
-        if len(filtered_df) < 50:
-            st.warning("⚠️ Not enough data for reliable training. Try expanding your date range or including more phases.")
-            st.stop()
-
-        with st.spinner("🧠 Training your AI model... Teaching it to recognize ENSO patterns..."):
-            X_custom = filtered_df[feature_cols]
-            y_custom = filtered_df["True_Phase"]
-
-            # Split data
-            X_train, X_test, y_train, y_test = train_test_split(
-                X_custom, y_custom, test_size=0.3, shuffle=False, random_state=42
-            )
-
-            # Train selected model
-            models = {
-                "Random Forest": RandomForestClassifier(random_state=42, n_estimators=100),
-                "Support Vector Machine": SVC(random_state=42, probability=True),
-                "Logistic Regression": LogisticRegression(random_state=42, max_iter=1000)
-            }
-
-            custom_model = models[selected_classifier]
-            custom_model.fit(X_train, y_train)
-            y_pred_custom = custom_model.predict(X_test)
-
-            # Calculate performance
-            custom_accuracy = accuracy_score(y_test, y_pred_custom)
-
-            # Results presentation
-            st.balloons()
-
-            st.markdown("### 🎉 Your Model is Ready!")
-
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.markdown(f"""
-                <div class="metric-container">
-                    <h3>🎯 Accuracy</h3>
-                    <h2>{custom_accuracy:.0%}</h2>
-                </div>
-                """, unsafe_allow_html=True)
-
-            with col2:
-                training_size = len(X_train)
-                st.markdown(f"""
-                <div class="metric-container">
-                    <h3>📚 Training Data</h3>
-                    <h2>{training_size}</h2>
-                    <small>months</small>
-                </div>
-                """, unsafe_allow_html=True)
-
-            with col3:
-                test_size = len(X_test)
-                st.markdown(f"""
-                <div class="metric-container">
-                    <h3>🧪 Test Data</h3>
-                    <h2>{test_size}</h2>
-                    <small>months</small>
-                </div>
-                """, unsafe_allow_html=True)
-
-            # Performance comparison
-            baseline_accuracy = accuracy_score(df["True_Phase"], df["Predicted_Phase"])
-
-            if custom_accuracy > baseline_accuracy:
-                comparison = f"🎉 **Outstanding!** Your model ({custom_accuracy:.0%}) outperformed our baseline ({baseline_accuracy:.0%})"
-                comparison_color = "green"
-            elif custom_accuracy > baseline_accuracy - 0.05:
-                comparison = f"👍 **Good work!** Your model ({custom_accuracy:.0%}) performed similarly to our baseline ({baseline_accuracy:.0%})"
-                comparison_color = "blue"
-            else:
-                comparison = f"🤔 **Learning opportunity!** Your model ({custom_accuracy:.0%}) has room for improvement vs baseline ({baseline_accuracy:.0%})"
-                comparison_color = "orange"
-
-            st.markdown(f"""
-            <div class="insight-card" style="border-left-color: {comparison_color};">
-                <h4>📊 Performance Comparison</h4>
-                <p>{comparison}</p>
-            </div>
-            """, unsafe_allow_html=True)
-
-            # Detailed results
-            st.markdown("### 📋 Detailed Performance Report")
-
-            # Per-phase performance
-            report = classification_report(y_test, y_pred_custom, output_dict=True)
-
-            phase_emojis = {"La Niña": "🔵", "Neutral": "⚪", "El Niño": "🔴"}
-
-            for phase in selected_phases:
-                if phase in report:
-                    precision = report[phase]['precision']
-                    recall = report[phase]['recall']
-                    f1 = report[phase]['f1-score']
-                    support = int(report[phase]['support'])
-
-                    st.markdown(f"""
-                    <div class="insight-card">
-                        <h4>{phase_emojis[phase]} {phase} Results</h4>
-                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 1rem;">
-                            <div><strong>Precision:</strong> {precision:.0%}</div>
-                            <div><strong>Recall:</strong> {recall:.0%}</div>
-                            <div><strong>F1-Score:</strong> {f1:.0%}</div>
-                            <div><strong>Test Cases:</strong> {support}</div>
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
-
-            # Feature importance (if available)
-            if hasattr(custom_model, 'feature_importances_'):
-                st.markdown("### 🔍 What Your Model Learned to Focus On")
-
-                importance_df = pd.DataFrame({
-                    "Feature": feature_cols,
-                    "Importance": custom_model.feature_importances_
-                }).sort_values("Importance", ascending=True)
-
-                fig = px.bar(importance_df, y="Feature", x="Importance",
-                           orientation="h", title="Your Model's Feature Importance")
-                fig.update_layout(height=400)
-                st.plotly_chart(fig, use_container_width=True)
-
-                # Insight about top feature
-                top_feature = importance_df.iloc[-1]
-                st.markdown(f"""
-                <div class="insight-card">
-                    <h4>🏆 Your Model's Favorite Signal</h4>
-                    <p>Your {selected_classifier} model found <strong>{top_feature['Feature']}</strong> to be the most important factor, 
-                    using it for {top_feature['Importance']:.0%} of its decision-making process.</p>
-                </div>
-                """, unsafe_allow_html=True)
-
-            # Actionable insights
-            st.markdown("### 💡 Insights and Next Steps")
-
-            insights = []
-
-            if custom_accuracy > 0.8:
-                insights.append("🌟 Excellent performance! Your model could be used for real predictions.")
-            elif custom_accuracy > 0.7:
-                insights.append("👍 Good performance! Consider fine-tuning parameters for even better results.")
-            else:
-                insights.append("🔧 Room for improvement. Try different time periods or algorithms.")
-
-            if len(selected_phases) < 3:
-                insights.append("🎭 You focused on specific phases - try including all phases to see the full picture.")
-
-            if (years[1] - years[0]) < 10:
-                insights.append("📅 Consider using more years of data for better model training.")
-
-            for insight in insights:
-                st.markdown(f"""
-                <div class="insight-card">
-                    <p>{insight}</p>
-                </div>
-                """, unsafe_allow_html=True)
-
-            # Download results
-            st.markdown("### 📥 Take Your Results With You")
-
-            # Create results dataframe
-            results_df = pd.DataFrame({
-                'Date': X_test.index,
-                'Actual_Phase': y_test,
-                'Predicted_Phase': y_pred_custom,
-                'Correct': y_test == y_pred_custom
+def create_sample_data():
+    """Create sample historical data for dashboard"""
+    dates = pd.date_range(start='2023-01-01', end='2024-12-31', freq='W')
+    
+    # Mock data for different monitoring sites
+    sites = ['Reef Site A', 'Reef Site B', 'Reef Site C', 'Reef Site D']
+    data = []
+    
+    for site in sites:
+        for date in dates:
+            # Simulate seasonal patterns and trends
+            base_health = 0.7 + 0.2 * np.sin(2 * np.pi * date.dayofyear / 365)
+            health_score = base_health + np.random.normal(0, 0.1)
+            health_score = np.clip(health_score, 0, 1)
+            
+            data.append({
+                'date': date,
+                'site': site,
+                'health_score': health_score,
+                'coral_coverage': np.random.uniform(30, 80),
+                'species_count': np.random.randint(8, 15),
+                'temperature_c': 25 + 3 * np.sin(2 * np.pi * date.dayofyear / 365) + np.random.normal(0, 1)
             })
+    
+    return pd.DataFrame(data)
 
-            results_df = results_df.merge(filtered_df[['Date'] + feature_cols],
-                                        left_on='Date', right_index=True, how='left')
+def main():
+    # Initialize classifier
+    if 'classifier' not in st.session_state:
+        st.session_state.classifier = CoralClassifier()
+    
+    # Header
+    st.markdown('<h1 class="coral-header">🪸 CoralYO</h1>', unsafe_allow_html=True)
+    st.markdown('<p style="text-align: center; font-size: 1.2rem; color: #666;">AI-Powered Coral Ecology Research Platform</p>', unsafe_allow_html=True)
+    st.markdown('<p style="text-align: center; font-style: italic;">Jennifer Smith Lab - UC San Diego</p>', unsafe_allow_html=True)
+    
+    # Sidebar
+    st.sidebar.header("🔬 Research Tools")
+    selected_tool = st.sidebar.selectbox(
+        "Select Research Module:",
+        ["Coral Identification", "Health Assessment", "Monitoring Dashboard", "Research Database"]
+    )
+    
+    if selected_tool == "Coral Identification":
+        coral_identification_module()
+    elif selected_tool == "Health Assessment":
+        health_assessment_module()
+    elif selected_tool == "Monitoring Dashboard":
+        monitoring_dashboard()
+    elif selected_tool == "Research Database":
+        research_database()
 
-            csv_data = results_df.to_csv(index=False)
+def coral_identification_module():
+    st.header("🔍 Coral Species Identification")
+    st.markdown("Upload coral images for AI-powered species identification")
+    
+    # File uploader
+    uploaded_file = st.file_uploader(
+        "Choose a coral image...",
+        type=['jpg', 'jpeg', 'png', 'tiff'],
+        help="Upload underwater coral images for species identification"
+    )
+    
+    if uploaded_file is not None:
+        # Display image
+        image = Image.open(uploaded_file)
+        st.image(image, caption="Uploaded Coral Image", use_column_width=True)
+        
+        # Convert to numpy array for processing
+        img_array = np.array(image)
+        
+        # Process with AI
+        with st.spinner("🤖 Analyzing coral species..."):
+            results = st.session_state.classifier.identify_species(img_array)
+        
+        # Display results
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            st.subheader("🏷️ Identification Results")
+            
+            # Main prediction
+            predicted_species = results['predicted_species']
+            confidence = results['confidence']
+            species_info = results['species_info']
+            
+            st.success(f"**Predicted Species:** {predicted_species}")
+            st.info(f"**Common Name:** {species_info['common_name']}")
+            st.metric("Confidence", f"{confidence:.1%}")
+            
+            # Species information
+            st.markdown("### Species Information")
+            col_a, col_b = st.columns(2)
+            with col_a:
+                st.write(f"**Family:** {species_info['family']}")
+                st.write(f"**Growth Form:** {species_info['growth_form']}")
+            with col_b:
+                st.write(f"**Threat Level:** {species_info['threat_level']}")
+                threat_color = "red" if "Critically" in species_info['threat_level'] else "orange" if "Near" in species_info['threat_level'] else "green"
+                st.markdown(f"<span style='color: {threat_color}'>●</span> Conservation Status", unsafe_allow_html=True)
+            
+            st.write(f"**Description:** {species_info['description']}")
+            
+            # All predictions
+            st.markdown("### All Predictions")
+            pred_df = pd.DataFrame(
+                [(species, conf) for species, conf in results['all_predictions'].items()],
+                columns=['Species', 'Confidence']
+            ).sort_values('Confidence', ascending=False)
+            
+            fig = px.bar(pred_df, x='Confidence', y='Species', orientation='h',
+                        title="Species Prediction Confidence",
+                        color='Confidence', color_continuous_scale='Viridis')
+            st.plotly_chart(fig, use_container_width=True)
+        
+        with col2:
+            st.subheader("📊 Quick Stats")
+            st.metric("Image Resolution", f"{img_array.shape[1]}x{img_array.shape[0]}")
+            st.metric("Color Channels", img_array.shape[2] if len(img_array.shape) > 2 else 1)
+            
+            # Export results
+            if st.button("📥 Export Results"):
+                results_json = json.dumps(results, indent=2, default=str)
+                st.download_button(
+                    label="Download JSON",
+                    data=results_json,
+                    file_name=f"coral_id_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                    mime="application/json"
+                )
 
-            st.download_button(
-                "📥 Download Your Model's Predictions",
-                data=csv_data,
-                file_name=f"custom_enso_model_{selected_classifier.lower().replace(' ', '_')}_{years[0]}_{years[1]}.csv",
-                mime="text/csv",
-                help="Download detailed results including predictions and input features"
+def health_assessment_module():
+    st.header("🏥 Coral Health Assessment")
+    st.markdown("Analyze coral health indicators and stress markers")
+    
+    # File uploader
+    uploaded_file = st.file_uploader(
+        "Choose a coral image for health assessment...",
+        type=['jpg', 'jpeg', 'png', 'tiff'],
+        key="health_uploader"
+    )
+    
+    if uploaded_file is not None:
+        # Display image
+        image = Image.open(uploaded_file)
+        st.image(image, caption="Coral Health Assessment", use_column_width=True)
+        
+        # Convert to numpy array
+        img_array = np.array(image)
+        
+        # Process with AI
+        with st.spinner("🔬 Analyzing coral health..."):
+            health_results = st.session_state.classifier.assess_health(img_array)
+            species_results = st.session_state.classifier.identify_species(img_array)
+        
+        # Display health results
+        col1, col2, col3 = st.columns([2, 1, 1])
+        
+        with col1:
+            st.subheader("🏥 Health Assessment")
+            
+            health_status = health_results['health_status']
+            confidence = health_results['confidence']
+            color_info = health_results['color_info']
+            
+            # Health status with color coding
+            st.markdown(f"**Health Status:** <span style='color: {color_info['color']}; font-weight: bold;'>{health_status.title()}</span>", unsafe_allow_html=True)
+            st.write(f"**Description:** {color_info['description']}")
+            st.metric("Assessment Confidence", f"{confidence:.1%}")
+            
+            # Health probabilities
+            health_probs = health_results['health_probabilities']
+            prob_df = pd.DataFrame(
+                [(status, prob) for status, prob in health_probs.items()],
+                columns=['Health Status', 'Probability']
+            ).sort_values('Probability', ascending=False)
+            
+            fig = px.pie(prob_df, values='Probability', names='Health Status',
+                        title="Health Status Probabilities",
+                        color_discrete_map={
+                            'healthy': '#00C851',
+                            'stressed': '#FF8800', 
+                            'bleached': '#FF4444',
+                            'diseased': '#AA00FF',
+                            'dead': '#666666'
+                        })
+            st.plotly_chart(fig, use_container_width=True)
+        
+        with col2:
+            st.subheader("📈 Health Metrics")
+            st.metric("Coral Coverage", f"{health_results['coverage_percent']:.1f}%")
+            st.metric("Polyp Density", f"{health_results['polyp_density_per_cm2']:.0f}/cm²")
+            st.metric("Tissue Thickness", f"{health_results['tissue_thickness_mm']:.1f}mm")
+        
+        with col3:
+            st.subheader("🔬 Research Insights")
+            insights = st.session_state.classifier.get_research_insights(
+                species_results['predicted_species'], health_status
             )
+            
+            for insight in insights:
+                st.info(insight)
+            
+            if not insights:
+                st.info("No specific research insights for this combination")
+        
+        # Detailed analysis
+        st.subheader("📊 Detailed Analysis")
+        
+        # Create metrics visualization
+        metrics_data = {
+            'Metric': ['Coverage %', 'Polyp Density', 'Tissue Thickness'],
+            'Value': [
+                health_results['coverage_percent'],
+                health_results['polyp_density_per_cm2'],
+                health_results['tissue_thickness_mm']
+            ],
+            'Unit': ['%', 'per cm²', 'mm']
+        }
+        
+        # Normalize values for radar chart
+        normalized_values = [
+            health_results['coverage_percent'] / 100,
+            health_results['polyp_density_per_cm2'] / 200,
+            health_results['tissue_thickness_mm'] / 5
+        ]
+        
+        fig = go.Figure()
+        fig.add_trace(go.Scatterpolar(
+            r=normalized_values,
+            theta=metrics_data['Metric'],
+            fill='toself',
+            name='Health Metrics',
+            line_color='#4ECDC4'
+        ))
+        
+        fig.update_layout(
+            polar=dict(
+                radialaxis=dict(
+                    visible=True,
+                    range=[0, 1]
+                )),
+            showlegend=True,
+            title="Normalized Health Metrics"
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
 
-elif page == "🌡 Global SST Snapshot":
-    st.header("🌡 Global Sea Surface Temperature (SST) Snapshot")
-    # st.markdown("### Global SST Snapshot")
-    selected_year = st.slider("Select Year", min_value=1982, max_value=2024, value=2010)
-    month_dict = {
-        "January": 1, "February": 2, "March": 3, "April": 4,
-        "May": 5, "June": 6, "July": 7, "August": 8,
-        "September": 9, "October": 10, "November": 11, "December": 12
-    }
-    selected_month = st.selectbox("Select Month", list(month_dict.keys()), index=7)
-    month_num = month_dict[selected_month]
-
-    try:
-        sst_slice = sst_ds.sel(time=(sst_ds['time.year'] == selected_year) & (sst_ds['time.month'] == month_num))['sst']
-        fig, ax = plt.subplots(figsize=(12, 6))
-        sst_slice.plot(ax=ax, cmap='coolwarm', cbar_kwargs={"label": "°C"})
-        ax.add_patch(patches.Rectangle((190, -5), 50, 10, edgecolor='black', facecolor='none', linewidth=1))
-        ax.text(189, 8, 'Niño 3.4 Region', color='black')
-        ax.set_xlabel("Longitude [°E]")
-        ax.set_ylabel("Latitude [°N]")
-        st.pyplot(fig)
-    except Exception as e:
-        st.error(f"Failed to fetch SST data for {selected_month} {selected_year}. Error: {e}")
-
-elif page == "📈 Historical Trends":
-    st.header("📈 Historical Trends")
-
-    years = st.slider("Select Year Range", 1982, 2025, (2000, 2020))
-    selected_phases = st.multiselect(
-        "Select ENSO Phases", ["La Niña", "Neutral", "El Niño"],
-        default=["La Niña", "Neutral", "El Niño"]
-    )
-
-    df_filtered = df[
-        (df["Date"].dt.year >= years[0]) &
-        (df["Date"].dt.year <= years[1]) &
-        (df["ENSO_Phase"].isin(selected_phases))
-    ]
-
-    st.markdown("### Sea Surface Temperature (SST) Timeline")
-
-    fig = make_subplots(specs=[[{"secondary_y": True}]])
-
-    fig.add_trace(
-        go.Scatter(
-            x=df_filtered["Date"], y=df_filtered["SST_Climatology"],
-            name="Climatological SST (°C)",
-            line=dict(color='deepskyblue', dash='dot')
-        ),
-        secondary_y=True,
-    )
-
-    fig.add_trace(
-        go.Scatter(
-            x=df_filtered["Date"], y=df_filtered["SST"],
-            name="Observed SST (°C)",
-            line=dict(color='orange')
-        ),
-        secondary_y=False,
-    )
-
-    fig.update_layout(
-        xaxis_title="Date",
-        yaxis_title="Sea Surface Temperature (°C)",
-        legend=dict(x=0.01, y=1.1),
-        template="plotly_dark",
-        margin=dict(t=30, b=30)
-    )
-
-    fig.update_yaxes(title_text="Sea Surface Temperature (°C)", range=[24, 30], secondary_y=False)
-    fig.update_yaxes(range=[24, 30], secondary_y=True, showticklabels=False)
-
-    climatology_min = df_filtered["SST_Climatology"].min()
-    climatology_max = df_filtered["SST_Climatology"].max()
-
-    fig.add_hline(y=climatology_min, line_dash="dot", line_color="gray",
-                  annotation_text="Min. Climatological SST", annotation_position="bottom right")
-
-    fig.add_hline(y=climatology_max, line_dash="dot", line_color="gray",
-                  annotation_text="Max. Climatological SST", annotation_position="top right")
-
-    st.plotly_chart(fig, use_container_width=True)
-
-    st.markdown("### Oceanic Niño Index (ONI) Timeline")
-    fig_oni = px.line(df_filtered, x="Date", y="ONI")
-    fig_oni.update_yaxes(title_text="Oceanic Niño Index")
-    fig_oni.add_hline(y=0.5, line_dash="dot", line_color="red",
-                      annotation_text="El Niño Threshold", annotation_position="top right")
-    fig_oni.add_hline(y=-0.5, line_dash="dot", line_color="blue",
-                      annotation_text="La Niña Threshold", annotation_position="bottom right")
-
-    st.plotly_chart(fig_oni, use_container_width=True)
-
-    st.markdown("### Southern Oscillation Index (SOI) Timeline")
-    fig_soi = px.line(df_filtered, x="Date", y="SOI")
-    fig_soi.update_layout(
-        yaxis_title="Southern Oscillation Index",
-        template="plotly_dark",
-        margin=dict(t=30, b=30)
-    )
-    fig_soi.add_hline(y=0, line_dash="dash", line_color="gray", annotation_text="La Niña Conditions", annotation_position="top right")
-    fig_soi.add_hline(y=0, line_dash="dash", line_color="gray", annotation_text="El Niño Conditions", annotation_position="bottom right")
-    fig_soi.add_hrect(y0=0, y1=3.2, line_width=0, fillcolor="blue", opacity=0.1)
-    fig_soi.add_hrect(y0=-3.2, y1=0, line_width=0, fillcolor="red", opacity=0.1)
-    st.plotly_chart(fig_soi, use_container_width=True)
-
-elif page == "💡 Model Insights":
-    st.header("💡 Model Insights")
-
-    accuracy = accuracy_score(df["True_Phase"], df["Predicted_Phase"])
-
-    # Original accuracy metric (unchanged)
-    st.metric("Model Accuracy", f"{accuracy * 100:.2f}%")
-
-    # NEW: Cross-validation scores (added, not replacing)
-    with st.spinner("Calculating cross-validation scores..."):
-        cv_mean, cv_std = calculate_cross_validation_scores(X, y_true)
-
+def monitoring_dashboard():
+    st.header("📊 Coral Reef Monitoring Dashboard")
+    st.markdown("Long-term monitoring and trend analysis")
+    
+    # Generate sample data
+    df = create_sample_data()
+    
+    # Date range selector
     col1, col2 = st.columns(2)
     with col1:
-        st.metric("CV Mean Accuracy", f"{cv_mean * 100:.2f}%")
+        start_date = st.date_input("Start Date", df['date'].min())
     with col2:
-        st.metric("CV Std Dev", f"±{cv_std * 100:.2f}%")
-
-    st.info(f"Cross-validation provides a more robust estimate: {cv_mean*100:.2f}% ± {cv_std*100:.2f}%")
-
-    st.markdown("### Classification Report")
-    report = classification_report(df["True_Phase"], df["Predicted_Phase"], output_dict=True)
-    st.dataframe(pd.DataFrame(report).transpose().round(2))
-
-    st.markdown("### Confusion Matrix")
-    cm = confusion_matrix(df["True_Phase"], df["Predicted_Phase"], labels=["La Niña", "Neutral", "El Niño"])
-    st.dataframe(pd.DataFrame(cm, index=["True La Niña", "True Neutral", "True El Niño"], columns=["Pred La Niña", "Pred Neutral", "Pred El Niño"]))
-
-    st.markdown("### Feature Importance")
-    importance_df = pd.DataFrame({
-        "Feature": feature_cols,
-        "Importance": model.feature_importances_
-    }).sort_values("Importance", ascending=False)
-    fig3 = px.bar(importance_df, x="Importance", y="Feature", orientation="h")
-    st.plotly_chart(fig3, use_container_width=True)
-
-    st.markdown("### Download ENSO Predictions Results")
-    st.download_button("📥 Download CSV", data=df.to_csv(index=False), file_name="model_enso_predictions.csv", mime="text/csv")
-
-elif page == "🛠 Custom Model Training":
-    st.header("🛠 Custom Model Training")
-    st.markdown("### Experiment with Different Models")
-    st.info("Train and compare different machine learning models on filtered ENSO data to see which performs best for your specific time period and conditions.")
-
-    years = st.slider("Select Year Range", 1982, 2025, (2000, 2020))
-    selected_phases = st.multiselect("Select ENSO Phases", ["La Niña", "Neutral", "El Niño"], default=["La Niña", "Neutral", "El Niño"])
-
-    filtered_df = df[
-        (df["Date"].dt.year >= years[0]) &
-        (df["Date"].dt.year <= years[1]) &
-        (df["True_Phase"].isin(selected_phases))
-    ]
-
-    X_custom = filtered_df[feature_cols]
-    y_custom = filtered_df["True_Phase"]
-
-    X_train, X_test, y_train, y_test = train_test_split(X_custom, y_custom, test_size=0.3, shuffle=False)
-
-    # NEW: Classifier selection (default unchanged)
-    classifier_options = {
-        "Random Forest": RandomForestClassifier(random_state=42),
-        "SVM": SVC(random_state=42, probability=True),
-        "Logistic Regression": LogisticRegression(random_state=42, max_iter=1000)
-    }
-
-    selected_classifier = st.selectbox("Choose Classifier", list(classifier_options.keys()), index=0)
-    custom_model = classifier_options[selected_classifier]
-
-    # Brief explanation for each classifier
-    classifier_info = {
-        "Random Forest": "Ensemble method using multiple decision trees. Good for feature importance and handles non-linear relationships well.",
-        "SVM": "Support Vector Machine finds optimal decision boundaries. Good for high-dimensional data.",
-        "Logistic Regression": "Linear model for classification. Simple, interpretable, and fast."
-    }
-    st.info(classifier_info[selected_classifier])
-
-    custom_model.fit(X_train, y_train)
-    y_pred_custom = custom_model.predict(X_test)
-
-    custom_accuracy = accuracy_score(y_test, y_pred_custom)
-    st.metric("Custom Model Accuracy", f"{custom_accuracy * 100:.2f}%")
-
-    st.markdown("### Classification Report")
-    report = classification_report(y_test, y_pred_custom, output_dict=True)
-    st.dataframe(pd.DataFrame(report).transpose().round(2))
-
-    st.markdown("### Confusion Matrix")
-    cm = confusion_matrix(y_test, y_pred_custom, labels=["La Niña", "Neutral", "El Niño"])
-    st.dataframe(pd.DataFrame(cm, index=["True La Niña", "True Neutral", "True El Niño"],
-                              columns=["Pred La Niña", "Pred Neutral", "Pred El Niño"]))
-
-    # Feature importance (when available)
-    if hasattr(custom_model, 'feature_importances_'):
-        importance_df = pd.DataFrame({
-            "Feature": feature_cols,
-            "Importance": custom_model.feature_importances_
-        }).sort_values("Importance", ascending=False)
-
-        fig = px.bar(importance_df, x="Importance", y="Feature", orientation="h")
-        st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.info(f"{selected_classifier} doesn't provide feature importance scores.")
-
-    X_custom = filtered_df[feature_cols]
-    y_pred_custom = model.predict(X_custom)
-    filtered_df["Predicted_Phase"] = [label_map[i] for i in y_pred_custom]
-
-    st.markdown("### Download Custom ENSO Prediction Results")
-    st.download_button("📥 Download CSV", filtered_df.to_csv(index=False), "custom_enso_predictions.csv", mime="text/csv")
-
-elif page == "🔮 Advanced Predictions":
-    st.header("🔮 Advanced ENSO Predictions")
-
-    # Introduction section
-    st.markdown("""
-    ### What is ENSO?
-    The **El Niño-Southern Oscillation (ENSO)** is a climate pattern that affects weather worldwide. It has three phases:
-    - 🔵 **La Niña**: Cooler ocean temperatures, often bringing more hurricanes and drought
-    - ⚪ **Neutral**: Normal ocean temperatures and typical weather patterns  
-    - 🔴 **El Niño**: Warmer ocean temperatures, often causing flooding and unusual weather
+        end_date = st.date_input("End Date", df['date'].max())
     
-    ### How This Prediction Works
-    Our AI model analyzes sea surface temperatures, atmospheric pressure, and historical patterns to predict which ENSO phase is most likely for any given month.
-    """)
-
-    st.markdown("---")
-
-    # Main prediction interface
-    st.markdown("### 🎯 Predict ENSO Phase for Any Month")
-    st.markdown("Choose a month and year to see what ENSO phase is predicted, along with the model's confidence level.")
-
-    col1, col2, col3 = st.columns([1, 1, 1])
-    with col1:
-        target_year = st.number_input("Year", min_value=1982, max_value=2030, value=2024, help="Select any year from 1982 to 2030")
-    with col2:
-        target_month = st.selectbox("Month", [
-            "January", "February", "March", "April", "May", "June",
-            "July", "August", "September", "October", "November", "December"
-        ], index=0, help="Select the month you want to predict")
-    with col3:
-        st.markdown("&nbsp;")  # Spacer
-        predict_button = st.button("🔮 Make Prediction", type="primary")
-
-    if predict_button:
-        month_num = {
-            "January": 1, "February": 2, "March": 3, "April": 4, "May": 5, "June": 6,
-            "July": 7, "August": 8, "September": 9, "October": 10, "November": 11, "December": 12
-        }[target_month]
-
-        target_date = datetime.date(target_year, month_num, 1)
-
-        try:
-            # Create features for the target date
-            X_target = create_feature_for_date(target_date, df, feature_cols)
-
-            # Get prediction and probabilities
-            prediction = model.predict(X_target)[0]
-            probabilities = model.predict_proba(X_target)[0]
-
-            predicted_phase = label_map[prediction]
-            max_prob = max(probabilities)
-
-            # Create result display
-            if predicted_phase == "El Niño":
-                phase_emoji = "🔴"
-                phase_color = "red"
-                phase_description = "Warmer ocean temperatures expected. This often brings increased rainfall to the southern US and can disrupt normal weather patterns globally."
-            elif predicted_phase == "La Niña":
-                phase_emoji = "🔵"
-                phase_color = "blue"
-                phase_description = "Cooler ocean temperatures expected. This often brings drier conditions to the southern US and more active hurricane seasons."
-            else:
-                phase_emoji = "⚪"
-                phase_color = "gray"
-                phase_description = "Normal ocean temperatures expected. Weather patterns should be closer to typical seasonal averages."
-
-            st.markdown("### 📊 Prediction Results")
-
-            # Main prediction result
-            st.markdown(f"""
-            <div style="background-color: {phase_color}15; padding: 20px; border-radius: 10px; border-left: 5px solid {phase_color};">
-                <h2 style="color: {phase_color}; margin: 0;">{phase_emoji} {predicted_phase}</h2>
-                <p style="margin: 5px 0 0 0; font-size: 18px;"><strong>Predicted for {target_month} {target_year}</strong></p>
-                <p style="margin: 10px 0 0 0;">{phase_description}</p>
-            </div>
-            """, unsafe_allow_html=True)
-
-            # Confidence level
-            if max_prob > 0.7:
-                confidence = "High"
-                confidence_color = "green"
-                confidence_desc = "The model is very confident in this prediction."
-            elif max_prob > 0.5:
-                confidence = "Moderate"
-                confidence_color = "orange"
-                confidence_desc = "The model has reasonable confidence, but there's some uncertainty."
-            else:
-                confidence = "Low"
-                confidence_color = "red"
-                confidence_desc = "The model has low confidence - the prediction is uncertain."
-
-            st.markdown(f"""
-            **Model Confidence:** <span style="color: {confidence_color};">**{confidence}** ({max_prob:.1%})</span>  
-            *{confidence_desc}*
-            """, unsafe_allow_html=True)
-
-            # Detailed probabilities
-            st.markdown("### 📈 Detailed Probabilities")
-            st.markdown("Here's how confident the model is for each possible ENSO phase:")
-
-            prob_data = {
-                "🔵 La Niña": probabilities[0],
-                "⚪ Neutral": probabilities[1],
-                "🔴 El Niño": probabilities[2]
-            }
-
-            for phase, prob in prob_data.items():
-                st.progress(prob, text=f"{phase}: {prob:.1%}")
-
-            # What this means section
-            st.markdown("### 🤔 What Does This Mean?")
-            st.markdown(f"""
-            - **Most Likely Outcome**: {predicted_phase} conditions in {target_month} {target_year}
-            - **Confidence Level**: {confidence} - {confidence_desc.lower()}
-            - **Key Insight**: The model analyzed sea surface temperatures, atmospheric pressure patterns, and historical data to make this prediction
-            """)
-
-            if max_prob < 0.6:
-                st.warning("⚠️ **Note**: This prediction has moderate to low confidence. ENSO predictions become less reliable further into the future or during transition periods.")
-
-        except Exception as e:
-            st.error(f"❌ Error making prediction: {e}")
-            st.info("Please try a different date or check if the data is available for your selected time period.")
-
-    st.markdown("---")
-
-    # Educational section about model performance
-    st.markdown("### 📚 How Accurate Are These Predictions?")
-
-    # Calculate and display model accuracy in an intuitive way
-    accuracy = accuracy_score(df["True_Phase"], df["Predicted_Phase"])
-    total_predictions = len(df)
-    correct_predictions = int(accuracy * total_predictions)
-
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("Overall Accuracy", f"{accuracy:.1%}", help="Percentage of predictions that were correct")
-    with col2:
-        st.metric("Total Predictions", f"{total_predictions:,}", help="Number of months analyzed")
-    with col3:
-        st.metric("Correct Predictions", f"{correct_predictions:,}", help="Number of months predicted correctly")
-
-    st.markdown(f"""
-    **What this means**: Out of {total_predictions:,} months of historical data, our model correctly predicted the ENSO phase {correct_predictions:,} times. 
-    That's an accuracy rate of {accuracy:.1%}, which is quite good for climate prediction!
+    # Filter data
+    mask = (df['date'] >= pd.Timestamp(start_date)) & (df['date'] <= pd.Timestamp(end_date))
+    filtered_df = df[mask]
     
-    **Important Notes**:
-    - Climate prediction is inherently uncertain - even the best models can't be 100% accurate
-    - Predictions are more reliable for the near future (3-6 months) than long-term forecasts
-    - The model works best during stable climate periods and may be less accurate during rapid transitions
-    """)
-
-    # Simple visualization of recent predictions vs reality
-    st.markdown("### 📊 Recent Predictions vs Reality")
-    st.markdown("See how well the model has been performing recently:")
-
-    # Show last 2 years of data
-    recent_data = df[df["Date"] >= (df["Date"].max() - pd.DateOffset(years=2))].copy()
-
-    # Create a simple comparison chart
-    fig_recent = go.Figure()
-
-    # Add actual phases
-    fig_recent.add_trace(go.Scatter(
-        x=recent_data["Date"],
-        y=[1 if phase == "El Niño" else 0 if phase == "Neutral" else -1 for phase in recent_data["True_Phase"]],
-        mode='lines+markers',
-        name='Actual Phase',
-        line=dict(color='blue', width=3),
-        marker=dict(size=8)
-    ))
-
-    # Add predicted phases
-    fig_recent.add_trace(go.Scatter(
-        x=recent_data["Date"],
-        y=[1 if phase == "El Niño" else 0 if phase == "Neutral" else -1 for phase in recent_data["Predicted_Phase"]],
-        mode='lines+markers',
-        name='Predicted Phase',
-        line=dict(color='red', width=2, dash='dot'),
-        marker=dict(size=6, symbol='x')
-    ))
-
-    fig_recent.update_layout(
-        title="Model Predictions vs Actual ENSO Phases (Last 2 Years)",
-        xaxis_title="Date",
-        yaxis_title="ENSO Phase",
-        yaxis=dict(
-            tickmode='array',
-            tickvals=[-1, 0, 1],
-            ticktext=['La Niña 🔵', 'Neutral ⚪', 'El Niño 🔴']
-        ),
-        template="plotly_white",
-        height=400,
-        hovermode='x unified'
+    # Summary metrics
+    st.subheader("📈 Summary Metrics")
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        avg_health = filtered_df['health_score'].mean()
+        st.metric("Average Health Score", f"{avg_health:.2f}", f"{avg_health-0.7:.2f}")
+    
+    with col2:
+        avg_coverage = filtered_df['coral_coverage'].mean()
+        st.metric("Average Coverage", f"{avg_coverage:.1f}%", f"{avg_coverage-60:.1f}%")
+    
+    with col3:
+        avg_species = filtered_df['species_count'].mean()
+        st.metric("Average Species Count", f"{avg_species:.0f}", f"{avg_species-12:.0f}")
+    
+    with col4:
+        avg_temp = filtered_df['temperature_c'].mean()
+        st.metric("Average Temperature", f"{avg_temp:.1f}°C", f"{avg_temp-26:.1f}°C")
+    
+    # Time series plots
+    st.subheader("📊 Temporal Trends")
+    
+    # Health score over time
+    fig = px.line(filtered_df, x='date', y='health_score', color='site',
+                  title="Coral Health Score Over Time",
+                  labels={'health_score': 'Health Score', 'date': 'Date'})
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # Multi-metric dashboard
+    fig = make_subplots(
+        rows=2, cols=2,
+        subplot_titles=('Coral Coverage', 'Species Count', 'Temperature', 'Health vs Coverage'),
+        specs=[[{"type": "scatter"}, {"type": "scatter"}],
+               [{"type": "scatter"}, {"type": "scatter"}]]
     )
+    
+    # Add traces for each site
+    for site in filtered_df['site'].unique():
+        site_data = filtered_df[filtered_df['site'] == site]
+        
+        fig.add_trace(
+            go.Scatter(x=site_data['date'], y=site_data['coral_coverage'], name=f"{site} Coverage", mode='lines'),
+            row=1, col=1
+        )
+        fig.add_trace(
+            go.Scatter(x=site_data['date'], y=site_data['species_count'], name=f"{site} Species", mode='lines'),
+            row=1, col=2
+        )
+        fig.add_trace(
+            go.Scatter(x=site_data['date'], y=site_data['temperature_c'], name=f"{site} Temp", mode='lines'),
+            row=2, col=1
+        )
+        fig.add_trace(
+            go.Scatter(x=site_data['coral_coverage'], y=site_data['health_score'], 
+                      name=f"{site} Health vs Coverage", mode='markers'),
+            row=2, col=2
+        )
+    
+    fig.update_layout(height=800, showlegend=False, title_text="Multi-Metric Monitoring Dashboard")
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # Site comparison
+    st.subheader("🏝️ Site Comparison")
+    
+    # Box plots for each metric
+    metrics = ['health_score', 'coral_coverage', 'species_count', 'temperature_c']
+    metric_names = ['Health Score', 'Coral Coverage (%)', 'Species Count', 'Temperature (°C)']
+    
+    selected_metric = st.selectbox("Select Metric for Comparison:", 
+                                  options=metrics, 
+                                  format_func=lambda x: metric_names[metrics.index(x)])
+    
+    fig = px.box(filtered_df, x='site', y=selected_metric, 
+                 title=f"{metric_names[metrics.index(selected_metric)]} by Site")
+    st.plotly_chart(fig, use_container_width=True)
 
-    st.plotly_chart(fig_recent, use_container_width=True)
+def research_database():
+    st.header("🗄️ Research Database")
+    st.markdown("Coral species database and research resources")
+    
+    # Species database
+    st.subheader("🐠 Species Database")
+    classifier = st.session_state.classifier
+    
+    # Create DataFrame from species database
+    species_data = []
+    for species, info in classifier.species_database.items():
+        species_data.append({
+            'Scientific Name': species,
+            'Common Name': info['common_name'],
+            'Family': info['family'],
+            'Growth Form': info['growth_form'],
+            'Threat Level': info['threat_level'],
+            'Description': info['description']
+        })
+    
+    species_df = pd.DataFrame(species_data)
+    
+    # Filters
+    col1, col2 = st.columns(2)
+    with col1:
+        family_filter = st.multiselect("Filter by Family:", 
+                                      options=species_df['Family'].unique(),
+                                      default=species_df['Family'].unique())
+    with col2:
+        threat_filter = st.multiselect("Filter by Threat Level:",
+                                      options=species_df['Threat Level'].unique(),
+                                      default=species_df['Threat Level'].unique())
+    
+    # Apply filters
+    filtered_species = species_df[
+        (species_df['Family'].isin(family_filter)) &
+        (species_df['Threat Level'].isin(threat_filter))
+    ]
+    
+    # Display table
+    st.dataframe(filtered_species, use_container_width=True)
+    
+    # Species statistics
+    st.subheader("📊 Database Statistics")
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric("Total Species", len(species_df))
+        
+    with col2:
+        threat_counts = species_df['Threat Level'].value_counts()
+        endangered_count = sum(1 for level in threat_counts.index if 'Endangered' in level)
+        st.metric("Endangered Species", endangered_count)
+    
+    with col3:
+        st.metric("Families Represented", len(species_df['Family'].unique()))
+    
+    # Threat level distribution
+    fig = px.pie(species_df, names='Threat Level', 
+                title="Species Distribution by Threat Level",
+                color_discrete_map={
+                    'Critically Endangered': '#FF4444',
+                    'Endangered': '#FF8800',
+                    'Near Threatened': '#FFD700',
+                    'Least Concern': '#00C851'
+                })
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # Growth form distribution
+    fig = px.histogram(species_df, x='Growth Form', 
+                      title="Species Distribution by Growth Form",
+                      color='Growth Form')
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # Research resources
+    st.subheader("📚 Research Resources")
+    
+    resources = [
+        {"title": "Coral Species Identification Guide", "type": "PDF", "size": "15.2 MB"},
+        {"title": "Health Assessment Protocols", "type": "PDF", "size": "8.7 MB"},
+        {"title": "Monitoring Best Practices", "type": "PDF", "size": "12.3 MB"},
+        {"title": "Statistical Analysis Templates", "type": "R Script", "size": "2.1 MB"},
+        {"title": "Image Processing Workflows", "type": "Python", "size": "5.4 MB"}
+    ]
+    
+    for resource in resources:
+        with st.expander(f"📄 {resource['title']}"):
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.write(f"Type: {resource['type']}")
+                st.write(f"Size: {resource['size']}")
+            with col2:
+                st.button(f"Download", key=f"download_{resource['title']}")
 
-    st.markdown("""
-    **How to read this chart**:
-    - **Blue line**: What actually happened
-    - **Red dotted line**: What the model predicted
-    - When the lines overlap, the model was correct
-    - When they diverge, the model made an error
-    """)
-
-    # Final tips section
-    st.markdown("### 💡 Tips for Using These Predictions")
-    st.markdown("""
-    1. **Short-term predictions** (1-3 months ahead) are generally more reliable
-    2. **High confidence predictions** (>70%) are more likely to be accurate
-    3. **Consider multiple factors** - ENSO is just one part of the climate system
-    4. **Use for planning** - These predictions can help with agricultural, business, or travel planning
-    5. **Stay updated** - Climate patterns can change rapidly, so check back regularly
-    """)
-
-elif page == "💡 Model Insights":
-    pass  # Remove this entire section
-
-
-# Footer with credits and additional info
-st.markdown("---")
-st.markdown("""
-<div style="text-align: center; padding: 2rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-           border-radius: 10px; color: white; margin-top: 2rem;">
-    <h3>🌊 ENSOcast</h3>
-    <p>Crafted with ❤️ by Dylan Dsouza</p>
-    <p><em>Bringing climate science to life through storytelling and AI</em></p>
-    <small>Data sources: NOAA, ECMWF | Built with Streamlit, Plotly, and Scikit-learn</small>
-</div>
-""", unsafe_allow_html=True)
+if __name__ == "__main__":
+    main()
