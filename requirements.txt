@@ -17,3 +17,4 @@ plotly
 # Basic utilities that come with most Python installations
 datetime
 cv2
+opencv-python-headless
