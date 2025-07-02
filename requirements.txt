@@ -16,3 +16,4 @@ plotly
 
 # Basic utilities that come with most Python installations
 opencv-python-headless
+tensorflow
