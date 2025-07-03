@@ -1,612 +1,551 @@
 import streamlit as st
-import pandas as pd
 import numpy as np
-import cv2
+import pandas as pd
 from PIL import Image
-import tensorflow as tf
-from tensorflow import keras
-import plotly.express as px
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-import datetime
 import io
 import base64
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple
 import json
 
-# Configuration
+# Configure the page
 st.set_page_config(
-    page_title="CoralYO - AI Coral Research Platform",
+    page_title="Coral Species Identifier",
     page_icon="🪸",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for better styling
-st.markdown("""
-<style>
-    .main > div {
-        padding-top: 2rem;
+# Comprehensive coral and algae species database
+CORAL_SPECIES_DB = {
+    # ACROPORA SPECIES
+    "Acropora cervicornis": {
+        "common_name": "Staghorn Coral",
+        "description": "Fast-growing branching coral with cylindrical branches resembling antlers",
+        "habitat": "Shallow reef environments, 1-30m depth",
+        "conservation_status": "Critically Endangered",
+        "characteristics": ["Branching growth form", "Cylindrical branches", "Small polyps", "Fast growth rate"],
+        "distribution": "Caribbean, Western Atlantic",
+        "category": "Hard Coral"
+    },
+    "Acropora palmata": {
+        "common_name": "Elkhorn Coral",
+        "description": "Large branching coral with flattened, plate-like branches",
+        "habitat": "Shallow reef crests, 1-20m depth",
+        "conservation_status": "Critically Endangered",
+        "characteristics": ["Flattened branches", "Plate-like structure", "Fast growth", "Wave-resistant"],
+        "distribution": "Caribbean, Western Atlantic",
+        "category": "Hard Coral"
+    },
+    "Acropora millepora": {
+        "common_name": "Small Polyp Staghorn",
+        "description": "Branching coral with dense, small polyps and fine skeletal structure",
+        "habitat": "Reef slopes and lagoons, 5-40m depth",
+        "conservation_status": "Near Threatened",
+        "characteristics": ["Dense branching", "Small polyps", "Fine skeleton", "Moderate growth"],
+        "distribution": "Indo-Pacific",
+        "category": "Hard Coral"
+    },
+    "Acropora tenuis": {
+        "common_name": "Slender Staghorn",
+        "description": "Delicate branching coral with thin, tapering branches",
+        "habitat": "Protected reef areas, 3-25m depth",
+        "conservation_status": "Near Threatened",
+        "characteristics": ["Thin branches", "Delicate structure", "Small polyps", "Moderate growth"],
+        "distribution": "Indo-Pacific",
+        "category": "Hard Coral"
+    },
+    "Acropora digitifera": {
+        "common_name": "Finger Acropora",
+        "description": "Robust branching coral with thick, finger-like projections",
+        "habitat": "Shallow reefs, 1-15m depth",
+        "conservation_status": "Near Threatened",
+        "characteristics": ["Thick branches", "Finger-like growth", "Robust structure", "Fast growth"],
+        "distribution": "Indo-Pacific",
+        "category": "Hard Coral"
+    },
+    "Acropora formosa": {
+        "common_name": "Beautiful Staghorn",
+        "description": "Elegant branching coral with symmetrical growth pattern",
+        "habitat": "Reef slopes, 5-30m depth",
+        "conservation_status": "Vulnerable",
+        "characteristics": ["Symmetrical branching", "Elegant structure", "Medium-sized polyps", "Moderate growth"],
+        "distribution": "Indo-Pacific",
+        "category": "Hard Coral"
+    },
+    
+    # POCILLOPORA SPECIES
+    "Pocillopora damicornis": {
+        "common_name": "Cauliflower Coral",
+        "description": "Branching coral with short, thick branches and warty surface texture",
+        "habitat": "Shallow reefs, tide pools, 0-40m depth",
+        "conservation_status": "Least Concern",
+        "characteristics": ["Short thick branches", "Warty surface", "Hardy species", "Fast growth"],
+        "distribution": "Indo-Pacific",
+        "category": "Hard Coral"
+    },
+    "Pocillopora verrucosa": {
+        "common_name": "Brush Coral",
+        "description": "Densely branching coral with fine, brush-like appearance",
+        "habitat": "Shallow reef areas, 1-25m depth",
+        "conservation_status": "Least Concern",
+        "characteristics": ["Dense branching", "Brush-like appearance", "Small branches", "Moderate growth"],
+        "distribution": "Indo-Pacific",
+        "category": "Hard Coral"
+    },
+    "Pocillopora eydouxi": {
+        "common_name": "Cluster Coral",
+        "description": "Compact branching coral forming dense clusters",
+        "habitat": "Reef flats and slopes, 2-30m depth",
+        "conservation_status": "Least Concern",
+        "characteristics": ["Compact growth", "Dense clusters", "Short branches", "Moderate growth"],
+        "distribution": "Indo-Pacific",
+        "category": "Hard Coral"
+    },
+    
+    # MONTIPORA SPECIES
+    "Montipora capitata": {
+        "common_name": "Rice Coral",
+        "description": "Plate-forming or branching coral with small tubercles covering the surface",
+        "habitat": "Shallow reefs, 1-30m depth",
+        "conservation_status": "Least Concern",
+        "characteristics": ["Plate or branching form", "Small tubercles", "Smooth surface", "Moderate growth"],
+        "distribution": "Indo-Pacific",
+        "category": "Hard Coral"
+    },
+    "Montipora monasteriata": {
+        "common_name": "Spiny Cup Coral",
+        "description": "Encrusting to massive coral with distinctive spiny polyps",
+        "habitat": "Reef slopes, 5-40m depth",
+        "conservation_status": "Least Concern",
+        "characteristics": ["Encrusting growth", "Spiny polyps", "Massive form", "Slow growth"],
+        "distribution": "Indo-Pacific",
+        "category": "Hard Coral"
+    },
+    "Montipora digitata": {
+        "common_name": "Finger Montipora",
+        "description": "Branching coral with finger-like projections and small polyps",
+        "habitat": "Shallow lagoons, 3-20m depth",
+        "conservation_status": "Least Concern",
+        "characteristics": ["Finger-like branches", "Small polyps", "Delicate structure", "Moderate growth"],
+        "distribution": "Indo-Pacific",
+        "category": "Hard Coral"
+    },
+    
+    # PORITES SPECIES
+    "Porites cylindrica": {
+        "common_name": "Cylinder Coral",
+        "description": "Branching coral with cylindrical branches and very small polyps",
+        "habitat": "Shallow reefs, lagoons, 1-25m depth",
+        "conservation_status": "Least Concern",
+        "characteristics": ["Cylindrical branches", "Very small polyps", "Dense skeleton", "Slow growth"],
+        "distribution": "Indo-Pacific",
+        "category": "Hard Coral"
+    },
+    "Porites lobata": {
+        "common_name": "Lobe Coral",
+        "description": "Massive coral forming large lobes with tiny polyps",
+        "habitat": "Reef slopes, 3-50m depth",
+        "conservation_status": "Least Concern",
+        "characteristics": ["Massive lobes", "Tiny polyps", "Long-lived", "Very slow growth"],
+        "distribution": "Indo-Pacific",
+        "category": "Hard Coral"
+    },
+    "Porites rus": {
+        "common_name": "Small Polyp Finger Coral",
+        "description": "Branching coral with small finger-like projections",
+        "habitat": "Shallow reefs, 2-20m depth",
+        "conservation_status": "Least Concern",
+        "characteristics": ["Small finger branches", "Tiny polyps", "Compact growth", "Slow growth"],
+        "distribution": "Indo-Pacific",
+        "category": "Hard Coral"
+    },
+    "Porites porites": {
+        "common_name": "Finger Coral",
+        "description": "Branching coral with finger-like projections and small polyps",
+        "habitat": "Shallow reefs, lagoons, 1-20m depth",
+        "conservation_status": "Least Concern",
+        "characteristics": ["Finger-like branches", "Small polyps", "Dense skeleton", "Moderate growth"],
+        "distribution": "Caribbean, Western Atlantic",
+        "category": "Hard Coral"
+    },
+    
+    # PAVONA SPECIES
+    "Pavona clavus": {
+        "common_name": "Leaf Coral",
+        "description": "Plate-forming coral with thin, leaf-like vertical plates",
+        "habitat": "Reef slopes, 5-50m depth",
+        "conservation_status": "Least Concern",
+        "characteristics": ["Leaf-like plates", "Vertical growth", "Thin structure", "Moderate growth"],
+        "distribution": "Indo-Pacific",
+        "category": "Hard Coral"
+    },
+    "Pavona decussata": {
+        "common_name": "Cactus Coral",
+        "description": "Branching coral with flattened, cactus-like plates",
+        "habitat": "Reef slopes, 3-40m depth",
+        "conservation_status": "Least Concern",
+        "characteristics": ["Flattened plates", "Cactus-like growth", "Branching form", "Moderate growth"],
+        "distribution": "Indo-Pacific",
+        "category": "Hard Coral"
+    },
+    "Pavona varians": {
+        "common_name": "Variable Leaf Coral",
+        "description": "Coral with variable growth forms from encrusting to plate-like",
+        "habitat": "Reef slopes, 5-30m depth",
+        "conservation_status": "Least Concern",
+        "characteristics": ["Variable growth forms", "Encrusting to plating", "Adaptable", "Moderate growth"],
+        "distribution": "Indo-Pacific",
+        "category": "Hard Coral"
+    },
+    
+    # FUNGIA SPECIES
+    "Fungia granulosa": {
+        "common_name": "Granular Mushroom Coral",
+        "description": "Solitary, disc-shaped coral with granular surface texture",
+        "habitat": "Sandy bottoms, reef slopes, 5-40m depth",
+        "conservation_status": "Least Concern",
+        "characteristics": ["Solitary disc shape", "Granular surface", "Free-living", "Slow growth"],
+        "distribution": "Indo-Pacific",
+        "category": "Hard Coral"
+    },
+    "Fungia scutaria": {
+        "common_name": "Plate Coral",
+        "description": "Large, plate-shaped solitary coral with radiating septa",
+        "habitat": "Sandy areas, reef slopes, 3-35m depth",
+        "conservation_status": "Least Concern",
+        "characteristics": ["Large plate shape", "Radiating septa", "Solitary", "Moderate growth"],
+        "distribution": "Indo-Pacific",
+        "category": "Hard Coral"
+    },
+    "Fungia fungites": {
+        "common_name": "Mushroom Coral",
+        "description": "Oval-shaped solitary coral with prominent central mouth",
+        "habitat": "Sandy bottoms, 5-30m depth",
+        "conservation_status": "Least Concern",
+        "characteristics": ["Oval shape", "Central mouth", "Free-living", "Moderate growth"],
+        "distribution": "Indo-Pacific",
+        "category": "Hard Coral"
+    },
+    
+    # ALGAE SPECIES
+    "Lobophora variegata": {
+        "common_name": "Fan Algae",
+        "description": "Brown algae forming fan-shaped or cup-shaped thalli",
+        "habitat": "Coral reefs, rocky substrates, 0-60m depth",
+        "conservation_status": "Not Evaluated",
+        "characteristics": ["Fan-shaped thalli", "Brown coloration", "Flexible structure", "Fast growth"],
+        "distribution": "Tropical and subtropical waters worldwide",
+        "category": "Brown Algae"
+    },
+    "Peyssonnelia sp.": {
+        "common_name": "Encrusting Red Algae",
+        "description": "Calcified red algae forming thin, encrusting layers",
+        "habitat": "Coral reefs, hard substrates, 0-100m depth",
+        "conservation_status": "Not Evaluated",
+        "characteristics": ["Encrusting growth", "Calcified structure", "Pink to red color", "Slow growth"],
+        "distribution": "Tropical and temperate waters worldwide",
+        "category": "Red Algae"
+    },
+    "Turf Algae": {
+        "common_name": "Turf Algae",
+        "description": "Short, dense mat of mixed filamentous algae species",
+        "habitat": "Coral reefs, rocky surfaces, 0-40m depth",
+        "conservation_status": "Not Evaluated",
+        "characteristics": ["Short filaments", "Dense mat", "Mixed species", "Fast growth"],
+        "distribution": "Worldwide",
+        "category": "Mixed Algae"
+    },
+    "Crustose Coralline Algae": {
+        "common_name": "CCA",
+        "description": "Calcified algae forming hard, pink crusts on reef surfaces",
+        "habitat": "Coral reefs, rocky substrates, 0-150m depth",
+        "conservation_status": "Not Evaluated",
+        "characteristics": ["Calcified crust", "Pink coloration", "Hard structure", "Very slow growth"],
+        "distribution": "Worldwide",
+        "category": "Red Algae"
+    },
+    
+    # ADDITIONAL CORAL SPECIES
+    "Stylophora pistillata": {
+        "common_name": "Smooth Cauliflower Coral",
+        "description": "Branching coral with smooth, rounded branch tips",
+        "habitat": "Shallow reefs, 1-40m depth",
+        "conservation_status": "Least Concern",
+        "characteristics": ["Smooth branches", "Rounded tips", "Dense growth", "Fast growth"],
+        "distribution": "Indo-Pacific",
+        "category": "Hard Coral"
+    },
+    "Seriatopora hystrix": {
+        "common_name": "Needle Coral",
+        "description": "Delicate branching coral with needle-like branch tips",
+        "habitat": "Protected reef areas, 3-30m depth",
+        "conservation_status": "Least Concern",
+        "characteristics": ["Needle-like tips", "Delicate structure", "Fine branching", "Moderate growth"],
+        "distribution": "Indo-Pacific",
+        "category": "Hard Coral"
+    },
+    "Galaxea fascicularis": {
+        "common_name": "Galaxy Coral",
+        "description": "Massive coral with large, prominent polyps arranged in clusters",
+        "habitat": "Reef slopes, 5-40m depth",
+        "conservation_status": "Least Concern",
+        "characteristics": ["Large polyps", "Clustered arrangement", "Massive form", "Aggressive"],
+        "distribution": "Indo-Pacific",
+        "category": "Hard Coral"
+    },
+    "Turbinaria reniformis": {
+        "common_name": "Yellow Scroll Coral",
+        "description": "Plate coral forming scroll-like or cup-shaped structures",
+        "habitat": "Reef slopes, 10-50m depth",
+        "conservation_status": "Least Concern",
+        "characteristics": ["Scroll-like plates", "Yellow coloration", "Cup-shaped", "Moderate growth"],
+        "distribution": "Indo-Pacific",
+        "category": "Hard Coral"
+    },
+    "Platygyra daedalea": {
+        "common_name": "Brain Coral",
+        "description": "Massive coral with meandering valleys resembling brain tissue",
+        "habitat": "Reef slopes, 3-50m depth",
+        "conservation_status": "Least Concern",
+        "characteristics": ["Meandering valleys", "Brain-like appearance", "Massive form", "Slow growth"],
+        "distribution": "Indo-Pacific",
+        "category": "Hard Coral"
     }
-    .stAlert {
-        margin-top: 1rem;
-    }
-    .coral-header {
-        background: linear-gradient(90deg, #FF6B6B, #4ECDC4, #45B7D1);
-        background-size: 200% 200%;
-        animation: gradient 5s ease infinite;
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
-        font-size: 3rem;
-        font-weight: bold;
-        text-align: center;
-        margin-bottom: 2rem;
-    }
-    @keyframes gradient {
-        0% {background-position: 0% 50%;}
-        50% {background-position: 100% 50%;}
-        100% {background-position: 0% 50%;}
-    }
-    .metric-card {
-        background: white;
-        padding: 1rem;
-        border-radius: 10px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        border-left: 4px solid #4ECDC4;
-    }
-    .species-tag {
-        background: #E3F2FD;
-        color: #1976D2;
-        padding: 0.25rem 0.5rem;
-        border-radius: 15px;
-        font-size: 0.8rem;
-        margin: 0.2rem;
-        display: inline-block;
-    }
-</style>
-""", unsafe_allow_html=True)
+}
 
-class CoralClassifier:
-    """Mock AI classifier for coral species identification and health assessment"""
+def analyze_coral_image(image: Image.Image) -> Dict:
+    """
+    Mock function to analyze coral image and return species prediction
+    In a real implementation, this would use a trained ML model
+    """
+    # Simulate image analysis
+    image_array = np.array(image)
     
-    def __init__(self):
-        self.species_database = {
-            'Acropora cervicornis': {
-                'common_name': 'Staghorn Coral',
-                'family': 'Acroporidae',
-                'growth_form': 'Branching',
-                'threat_level': 'Critically Endangered',
-                'description': 'Fast-growing branching coral, critical for reef structure'
-            },
-            'Acropora palmata': {
-                'common_name': 'Elkhorn Coral',
-                'family': 'Acroporidae', 
-                'growth_form': 'Plate-like',
-                'threat_level': 'Critically Endangered',
-                'description': 'Large plate-like coral providing habitat for many species'
-            },
-            'Montastraea cavernosa': {
-                'common_name': 'Great Star Coral',
-                'family': 'Montastraeidae',
-                'growth_form': 'Massive',
-                'threat_level': 'Near Threatened',
-                'description': 'Large boulder coral with distinctive star-shaped polyps'
-            },
-            'Diploria strigosa': {
-                'common_name': 'Symmetrical Brain Coral',
-                'family': 'Mussidae',
-                'growth_form': 'Massive',
-                'threat_level': 'Near Threatened',
-                'description': 'Brain-like coral with symmetrical ridge patterns'
-            },
-            'Porites astreoides': {
-                'common_name': 'Mustard Hill Coral',
-                'family': 'Poritidae',
-                'growth_form': 'Massive',
-                'threat_level': 'Least Concern',
-                'description': 'Hardy coral with small polyps, often yellow-green'
-            }
-        }
-        
-        self.health_indicators = {
-            'healthy': {'color': '#00C851', 'description': 'Normal coloration and polyp extension'},
-            'stressed': {'color': '#FF8800', 'description': 'Pale coloration, possible environmental stress'},
-            'bleached': {'color': '#FF4444', 'description': 'White/pale, symbiotic algae loss'},
-            'diseased': {'color': '#AA00FF', 'description': 'Tissue necrosis or disease signs'},
-            'dead': {'color': '#666666', 'description': 'No living tissue, algae-covered skeleton'}
-        }
+    # Mock analysis based on image properties
+    height, width = image_array.shape[:2]
+    avg_color = np.mean(image_array, axis=(0, 1))
     
-    def identify_species(self, image: np.ndarray) -> Dict:
-        """Mock species identification - in reality would use trained CNN model"""
-        # Simulate AI processing
-        species_list = list(self.species_database.keys())
-        # Mock confidence scores
-        confidences = np.random.dirichlet(np.ones(len(species_list)) * 0.5)
-        predicted_species = species_list[np.argmax(confidences)]
-        
-        return {
-            'predicted_species': predicted_species,
-            'confidence': float(np.max(confidences)),
-            'all_predictions': {species: float(conf) for species, conf in zip(species_list, confidences)},
-            'species_info': self.species_database[predicted_species]
-        }
+    # Mock prediction logic (replace with actual ML model)
+    species_list = list(CORAL_SPECIES_DB.keys())
     
-    def assess_health(self, image: np.ndarray) -> Dict:
-        """Mock health assessment - would use trained model for health indicators"""
-        # Simulate health analysis
-        health_states = list(self.health_indicators.keys())
-        health_probs = np.random.dirichlet(np.ones(len(health_states)) * 0.3)
-        predicted_health = health_states[np.argmax(health_probs)]
-        
-        # Mock additional metrics
-        coverage_percent = np.random.uniform(20, 95)
-        polyp_density = np.random.uniform(50, 200)
-        tissue_thickness = np.random.uniform(0.5, 3.0)
-        
-        return {
-            'health_status': predicted_health,
-            'confidence': float(np.max(health_probs)),
-            'health_probabilities': {state: float(prob) for state, prob in zip(health_states, health_probs)},
-            'coverage_percent': coverage_percent,
-            'polyp_density_per_cm2': polyp_density,
-            'tissue_thickness_mm': tissue_thickness,
-            'color_info': self.health_indicators[predicted_health]
-        }
+    # Simulate confidence scores
+    np.random.seed(42)  # For reproducible results
+    confidences = np.random.dirichlet(np.ones(len(species_list)), size=1)[0]
     
-    def get_research_insights(self, species: str, health_status: str) -> List[str]:
-        """Generate research insights based on identification and health assessment"""
-        insights = []
-        
-        if species in self.species_database:
-            species_info = self.species_database[species]
-            
-            if species_info['threat_level'] == 'Critically Endangered':
-                insights.append(f"⚠️ {species} is critically endangered - document location for conservation efforts")
-            
-            if health_status == 'bleached' and species_info['growth_form'] == 'Branching':
-                insights.append("🌡️ Branching corals are highly susceptible to thermal stress - check water temperature")
-            
-            if health_status == 'healthy' and species_info['threat_level'] != 'Least Concern':
-                insights.append("✅ Healthy specimen of threatened species - ideal for genetic sampling")
-        
-        return insights
+    # Sort by confidence
+    predictions = sorted(zip(species_list, confidences), key=lambda x: x[1], reverse=True)
+    
+    return {
+        "predictions": predictions,
+        "image_stats": {
+            "dimensions": f"{width}x{height}",
+            "avg_color": avg_color.tolist() if len(avg_color) > 1 else [avg_color],
+            "file_size": len(image.tobytes())
+        }
+    }
 
-def create_sample_data():
-    """Create sample historical data for dashboard"""
-    dates = pd.date_range(start='2023-01-01', end='2024-12-31', freq='W')
-    
-    # Mock data for different monitoring sites
-    sites = ['Reef Site A', 'Reef Site B', 'Reef Site C', 'Reef Site D']
-    data = []
-    
-    for site in sites:
-        for date in dates:
-            # Simulate seasonal patterns and trends
-            base_health = 0.7 + 0.2 * np.sin(2 * np.pi * date.dayofyear / 365)
-            health_score = base_health + np.random.normal(0, 0.1)
-            health_score = np.clip(health_score, 0, 1)
+def display_species_info(species_name: str, confidence: float):
+    """Display detailed information about a coral species"""
+    if species_name in CORAL_SPECIES_DB:
+        species_info = CORAL_SPECIES_DB[species_name]
+        
+        col1, col2 = st.columns([1, 2])
+        
+        with col1:
+            st.metric("Confidence", f"{confidence:.2%}")
             
-            data.append({
-                'date': date,
-                'site': site,
-                'health_score': health_score,
-                'coral_coverage': np.random.uniform(30, 80),
-                'species_count': np.random.randint(8, 15),
-                'temperature_c': 25 + 3 * np.sin(2 * np.pi * date.dayofyear / 365) + np.random.normal(0, 1)
-            })
-    
-    return pd.DataFrame(data)
+            # Conservation status with color coding
+            status = species_info["conservation_status"]
+            if status == "Critically Endangered":
+                st.error(f"Status: {status}")
+            elif status == "Near Threatened":
+                st.warning(f"Status: {status}")
+            else:
+                st.success(f"Status: {status}")
+        
+        with col2:
+            st.write(f"**Common Name:** {species_info['common_name']}")
+            st.write(f"**Description:** {species_info['description']}")
+            st.write(f"**Habitat:** {species_info['habitat']}")
+            st.write(f"**Distribution:** {species_info['distribution']}")
+            
+            # Characteristics
+            st.write("**Key Characteristics:**")
+            for char in species_info['characteristics']:
+                st.write(f"• {char}")
 
 def main():
-    # Initialize classifier
-    if 'classifier' not in st.session_state:
-        st.session_state.classifier = CoralClassifier()
+    st.title("🪸 Coral Species Identifier")
+    st.markdown("Upload an image of coral to identify the species and learn about its characteristics.")
     
-    # Header
-    st.markdown('<h1 class="coral-header">🪸 CoralYO</h1>', unsafe_allow_html=True)
-    st.markdown('<p style="text-align: center; font-size: 1.2rem; color: #666;">AI-Powered Coral Ecology Research Platform</p>', unsafe_allow_html=True)
-    st.markdown('<p style="text-align: center; font-style: italic;">Jennifer Smith Lab - UC San Diego</p>', unsafe_allow_html=True)
+    # Sidebar with information
+    with st.sidebar:
+        st.header("About This Tool")
+        st.write("""
+        This coral species identifier helps marine biologists, divers, and coral enthusiasts 
+        identify different coral species from photographs.
+        """)
+        
+        st.header("How to Use")
+        st.write("""
+        1. Upload a clear image of coral
+        2. Wait for the analysis to complete
+        3. Review the species predictions
+        4. Explore detailed species information
+        """)
+        
+        st.header("Supported Categories")
+        categories = {}
+        for species, info in CORAL_SPECIES_DB.items():
+            category = info.get("category", "Unknown")
+            if category not in categories:
+                categories[category] = []
+            categories[category].append(species)
+        
+        for category, species_list in categories.items():
+            st.write(f"**{category}:** {len(species_list)} species")
+            
+        st.header("Species Count by Genus")
+        genus_counts = {}
+        for species in CORAL_SPECIES_DB.keys():
+            genus = species.split()[0] if " " in species else species
+            genus_counts[genus] = genus_counts.get(genus, 0) + 1
+        
+        for genus, count in sorted(genus_counts.items()):
+            st.write(f"• {genus}: {count}")
+        
+        st.header("Tips for Best Results")
+        st.write("""
+        • Use high-resolution images
+        • Ensure good lighting
+        • Capture coral structure clearly
+        • Avoid blurry or dark images
+        """)
     
-    # Sidebar
-    st.sidebar.header("🔬 Research Tools")
-    selected_tool = st.sidebar.selectbox(
-        "Select Research Module:",
-        ["Coral Identification", "Health Assessment", "Monitoring Dashboard", "Research Database"]
-    )
-    
-    if selected_tool == "Coral Identification":
-        coral_identification_module()
-    elif selected_tool == "Health Assessment":
-        health_assessment_module()
-    elif selected_tool == "Monitoring Dashboard":
-        monitoring_dashboard()
-    elif selected_tool == "Research Database":
-        research_database()
-
-def coral_identification_module():
-    st.header("🔍 Coral Species Identification")
-    st.markdown("Upload coral images for AI-powered species identification")
-    
-    # File uploader
+    # Main content area
     uploaded_file = st.file_uploader(
         "Choose a coral image...",
-        type=['jpg', 'jpeg', 'png', 'tiff'],
-        help="Upload underwater coral images for species identification"
+        type=['jpg', 'jpeg', 'png', 'bmp'],
+        help="Upload a clear image of coral for species identification"
     )
     
     if uploaded_file is not None:
-        # Display image
+        # Display the uploaded image
         image = Image.open(uploaded_file)
-        st.image(image, caption="Uploaded Coral Image", use_column_width=True)
         
-        # Convert to numpy array for processing
-        img_array = np.array(image)
-        
-        # Process with AI
-        with st.spinner("🤖 Analyzing coral species..."):
-            results = st.session_state.classifier.identify_species(img_array)
-        
-        # Display results
-        col1, col2 = st.columns([2, 1])
+        col1, col2 = st.columns([1, 1])
         
         with col1:
-            st.subheader("🏷️ Identification Results")
+            st.subheader("Uploaded Image")
+            st.image(image, caption="Coral Image for Analysis", use_column_width=True)
             
-            # Main prediction
-            predicted_species = results['predicted_species']
-            confidence = results['confidence']
-            species_info = results['species_info']
-            
-            st.success(f"**Predicted Species:** {predicted_species}")
-            st.info(f"**Common Name:** {species_info['common_name']}")
-            st.metric("Confidence", f"{confidence:.1%}")
-            
-            # Species information
-            st.markdown("### Species Information")
-            col_a, col_b = st.columns(2)
-            with col_a:
-                st.write(f"**Family:** {species_info['family']}")
-                st.write(f"**Growth Form:** {species_info['growth_form']}")
-            with col_b:
-                st.write(f"**Threat Level:** {species_info['threat_level']}")
-                threat_color = "red" if "Critically" in species_info['threat_level'] else "orange" if "Near" in species_info['threat_level'] else "green"
-                st.markdown(f"<span style='color: {threat_color}'>●</span> Conservation Status", unsafe_allow_html=True)
-            
-            st.write(f"**Description:** {species_info['description']}")
-            
-            # All predictions
-            st.markdown("### All Predictions")
-            pred_df = pd.DataFrame(
-                [(species, conf) for species, conf in results['all_predictions'].items()],
-                columns=['Species', 'Confidence']
-            ).sort_values('Confidence', ascending=False)
-            
-            fig = px.bar(pred_df, x='Confidence', y='Species', orientation='h',
-                        title="Species Prediction Confidence",
-                        color='Confidence', color_continuous_scale='Viridis')
-            st.plotly_chart(fig, use_container_width=True)
+            # Image information
+            st.write(f"**Filename:** {uploaded_file.name}")
+            st.write(f"**Size:** {image.size}")
+            st.write(f"**Format:** {image.format}")
         
         with col2:
-            st.subheader("📊 Quick Stats")
-            st.metric("Image Resolution", f"{img_array.shape[1]}x{img_array.shape[0]}")
-            st.metric("Color Channels", img_array.shape[2] if len(img_array.shape) > 2 else 1)
+            st.subheader("Analysis Results")
             
-            # Export results
-            if st.button("📥 Export Results"):
-                results_json = json.dumps(results, indent=2, default=str)
-                st.download_button(
-                    label="Download JSON",
-                    data=results_json,
-                    file_name=f"coral_id_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-                    mime="application/json"
-                )
-
-def health_assessment_module():
-    st.header("🏥 Coral Health Assessment")
-    st.markdown("Analyze coral health indicators and stress markers")
-    
-    # File uploader
-    uploaded_file = st.file_uploader(
-        "Choose a coral image for health assessment...",
-        type=['jpg', 'jpeg', 'png', 'tiff'],
-        key="health_uploader"
-    )
-    
-    if uploaded_file is not None:
-        # Display image
-        image = Image.open(uploaded_file)
-        st.image(image, caption="Coral Health Assessment", use_column_width=True)
+            # Analyze the image
+            with st.spinner("Analyzing coral image..."):
+                results = analyze_coral_image(image)
+            
+            # Display predictions
+            st.write("**Species Predictions:**")
+            
+            for i, (species, confidence) in enumerate(results["predictions"][:3]):
+                with st.expander(f"#{i+1} {species} ({confidence:.2%})", expanded=(i==0)):
+                    display_species_info(species, confidence)
         
-        # Convert to numpy array
-        img_array = np.array(image)
+        # Additional analysis section
+        st.subheader("📊 Image Analysis Details")
         
-        # Process with AI
-        with st.spinner("🔬 Analyzing coral health..."):
-            health_results = st.session_state.classifier.assess_health(img_array)
-            species_results = st.session_state.classifier.identify_species(img_array)
-        
-        # Display health results
-        col1, col2, col3 = st.columns([2, 1, 1])
+        col1, col2, col3 = st.columns(3)
         
         with col1:
-            st.subheader("🏥 Health Assessment")
-            
-            health_status = health_results['health_status']
-            confidence = health_results['confidence']
-            color_info = health_results['color_info']
-            
-            # Health status with color coding
-            st.markdown(f"**Health Status:** <span style='color: {color_info['color']}; font-weight: bold;'>{health_status.title()}</span>", unsafe_allow_html=True)
-            st.write(f"**Description:** {color_info['description']}")
-            st.metric("Assessment Confidence", f"{confidence:.1%}")
-            
-            # Health probabilities
-            health_probs = health_results['health_probabilities']
-            prob_df = pd.DataFrame(
-                [(status, prob) for status, prob in health_probs.items()],
-                columns=['Health Status', 'Probability']
-            ).sort_values('Probability', ascending=False)
-            
-            fig = px.pie(prob_df, values='Probability', names='Health Status',
-                        title="Health Status Probabilities",
-                        color_discrete_map={
-                            'healthy': '#00C851',
-                            'stressed': '#FF8800', 
-                            'bleached': '#FF4444',
-                            'diseased': '#AA00FF',
-                            'dead': '#666666'
-                        })
-            st.plotly_chart(fig, use_container_width=True)
+            st.metric("Image Dimensions", results["image_stats"]["dimensions"])
         
         with col2:
-            st.subheader("📈 Health Metrics")
-            st.metric("Coral Coverage", f"{health_results['coverage_percent']:.1f}%")
-            st.metric("Polyp Density", f"{health_results['polyp_density_per_cm2']:.0f}/cm²")
-            st.metric("Tissue Thickness", f"{health_results['tissue_thickness_mm']:.1f}mm")
+            avg_color = results["image_stats"]["avg_color"]
+            if len(avg_color) >= 3:
+                st.write("**Average Color (RGB):**")
+                st.write(f"R: {avg_color[0]:.0f}, G: {avg_color[1]:.0f}, B: {avg_color[2]:.0f}")
+            else:
+                st.write("**Average Intensity:**")
+                st.write(f"{avg_color[0]:.0f}")
         
         with col3:
-            st.subheader("🔬 Research Insights")
-            insights = st.session_state.classifier.get_research_insights(
-                species_results['predicted_species'], health_status
-            )
-            
-            for insight in insights:
-                st.info(insight)
-            
-            if not insights:
-                st.info("No specific research insights for this combination")
+            file_size_mb = results["image_stats"]["file_size"] / (1024 * 1024)
+            st.metric("File Size", f"{file_size_mb:.2f} MB")
         
-        # Detailed analysis
-        st.subheader("📊 Detailed Analysis")
+        # Confidence chart
+        st.subheader("📈 Prediction Confidence")
         
-        # Create metrics visualization
-        metrics_data = {
-            'Metric': ['Coverage %', 'Polyp Density', 'Tissue Thickness'],
-            'Value': [
-                health_results['coverage_percent'],
-                health_results['polyp_density_per_cm2'],
-                health_results['tissue_thickness_mm']
-            ],
-            'Unit': ['%', 'per cm²', 'mm']
+        # Create a dataframe for the chart
+        chart_data = pd.DataFrame({
+            'Species': [pred[0] for pred in results["predictions"]],
+            'Confidence': [pred[1] for pred in results["predictions"]]
+        })
+        
+        st.bar_chart(chart_data.set_index('Species'))
+        
+        # Download results
+        st.subheader("💾 Download Results")
+        
+        results_json = {
+            "filename": uploaded_file.name,
+            "predictions": [{"species": pred[0], "confidence": float(pred[1])} for pred in results["predictions"]],
+            "image_stats": results["image_stats"]
         }
         
-        # Normalize values for radar chart
-        normalized_values = [
-            health_results['coverage_percent'] / 100,
-            health_results['polyp_density_per_cm2'] / 200,
-            health_results['tissue_thickness_mm'] / 5
-        ]
-        
-        fig = go.Figure()
-        fig.add_trace(go.Scatterpolar(
-            r=normalized_values,
-            theta=metrics_data['Metric'],
-            fill='toself',
-            name='Health Metrics',
-            line_color='#4ECDC4'
-        ))
-        
-        fig.update_layout(
-            polar=dict(
-                radialaxis=dict(
-                    visible=True,
-                    range=[0, 1]
-                )),
-            showlegend=True,
-            title="Normalized Health Metrics"
-        )
-        
-        st.plotly_chart(fig, use_container_width=True)
-
-def monitoring_dashboard():
-    st.header("📊 Coral Reef Monitoring Dashboard")
-    st.markdown("Long-term monitoring and trend analysis")
-    
-    # Generate sample data
-    df = create_sample_data()
-    
-    # Date range selector
-    col1, col2 = st.columns(2)
-    with col1:
-        start_date = st.date_input("Start Date", df['date'].min())
-    with col2:
-        end_date = st.date_input("End Date", df['date'].max())
-    
-    # Filter data
-    mask = (df['date'] >= pd.Timestamp(start_date)) & (df['date'] <= pd.Timestamp(end_date))
-    filtered_df = df[mask]
-    
-    # Summary metrics
-    st.subheader("📈 Summary Metrics")
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        avg_health = filtered_df['health_score'].mean()
-        st.metric("Average Health Score", f"{avg_health:.2f}", f"{avg_health-0.7:.2f}")
-    
-    with col2:
-        avg_coverage = filtered_df['coral_coverage'].mean()
-        st.metric("Average Coverage", f"{avg_coverage:.1f}%", f"{avg_coverage-60:.1f}%")
-    
-    with col3:
-        avg_species = filtered_df['species_count'].mean()
-        st.metric("Average Species Count", f"{avg_species:.0f}", f"{avg_species-12:.0f}")
-    
-    with col4:
-        avg_temp = filtered_df['temperature_c'].mean()
-        st.metric("Average Temperature", f"{avg_temp:.1f}°C", f"{avg_temp-26:.1f}°C")
-    
-    # Time series plots
-    st.subheader("📊 Temporal Trends")
-    
-    # Health score over time
-    fig = px.line(filtered_df, x='date', y='health_score', color='site',
-                  title="Coral Health Score Over Time",
-                  labels={'health_score': 'Health Score', 'date': 'Date'})
-    st.plotly_chart(fig, use_container_width=True)
-    
-    # Multi-metric dashboard
-    fig = make_subplots(
-        rows=2, cols=2,
-        subplot_titles=('Coral Coverage', 'Species Count', 'Temperature', 'Health vs Coverage'),
-        specs=[[{"type": "scatter"}, {"type": "scatter"}],
-               [{"type": "scatter"}, {"type": "scatter"}]]
-    )
-    
-    # Add traces for each site
-    for site in filtered_df['site'].unique():
-        site_data = filtered_df[filtered_df['site'] == site]
-        
-        fig.add_trace(
-            go.Scatter(x=site_data['date'], y=site_data['coral_coverage'], name=f"{site} Coverage", mode='lines'),
-            row=1, col=1
-        )
-        fig.add_trace(
-            go.Scatter(x=site_data['date'], y=site_data['species_count'], name=f"{site} Species", mode='lines'),
-            row=1, col=2
-        )
-        fig.add_trace(
-            go.Scatter(x=site_data['date'], y=site_data['temperature_c'], name=f"{site} Temp", mode='lines'),
-            row=2, col=1
-        )
-        fig.add_trace(
-            go.Scatter(x=site_data['coral_coverage'], y=site_data['health_score'], 
-                      name=f"{site} Health vs Coverage", mode='markers'),
-            row=2, col=2
+        st.download_button(
+            label="Download Analysis Results (JSON)",
+            data=json.dumps(results_json, indent=2),
+            file_name=f"coral_analysis_{uploaded_file.name.split('.')[0]}.json",
+            mime="application/json"
         )
     
-    fig.update_layout(height=800, showlegend=False, title_text="Multi-Metric Monitoring Dashboard")
-    st.plotly_chart(fig, use_container_width=True)
-    
-    # Site comparison
-    st.subheader("🏝️ Site Comparison")
-    
-    # Box plots for each metric
-    metrics = ['health_score', 'coral_coverage', 'species_count', 'temperature_c']
-    metric_names = ['Health Score', 'Coral Coverage (%)', 'Species Count', 'Temperature (°C)']
-    
-    selected_metric = st.selectbox("Select Metric for Comparison:", 
-                                  options=metrics, 
-                                  format_func=lambda x: metric_names[metrics.index(x)])
-    
-    fig = px.box(filtered_df, x='site', y=selected_metric, 
-                 title=f"{metric_names[metrics.index(selected_metric)]} by Site")
-    st.plotly_chart(fig, use_container_width=True)
-
-def research_database():
-    st.header("🗄️ Research Database")
-    st.markdown("Coral species database and research resources")
-    
-    # Species database
-    st.subheader("🐠 Species Database")
-    classifier = st.session_state.classifier
-    
-    # Create DataFrame from species database
-    species_data = []
-    for species, info in classifier.species_database.items():
-        species_data.append({
-            'Scientific Name': species,
-            'Common Name': info['common_name'],
-            'Family': info['family'],
-            'Growth Form': info['growth_form'],
-            'Threat Level': info['threat_level'],
-            'Description': info['description']
-        })
-    
-    species_df = pd.DataFrame(species_data)
-    
-    # Filters
-    col1, col2 = st.columns(2)
-    with col1:
-        family_filter = st.multiselect("Filter by Family:", 
-                                      options=species_df['Family'].unique(),
-                                      default=species_df['Family'].unique())
-    with col2:
-        threat_filter = st.multiselect("Filter by Threat Level:",
-                                      options=species_df['Threat Level'].unique(),
-                                      default=species_df['Threat Level'].unique())
-    
-    # Apply filters
-    filtered_species = species_df[
-        (species_df['Family'].isin(family_filter)) &
-        (species_df['Threat Level'].isin(threat_filter))
-    ]
-    
-    # Display table
-    st.dataframe(filtered_species, use_container_width=True)
-    
-    # Species statistics
-    st.subheader("📊 Database Statistics")
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.metric("Total Species", len(species_df))
+    else:
+        # Show example/demo section when no image is uploaded
+        st.info("👆 Upload a coral image to get started!")
         
-    with col2:
-        threat_counts = species_df['Threat Level'].value_counts()
-        endangered_count = sum(1 for level in threat_counts.index if 'Endangered' in level)
-        st.metric("Endangered Species", endangered_count)
-    
-    with col3:
-        st.metric("Families Represented", len(species_df['Family'].unique()))
-    
-    # Threat level distribution
-    fig = px.pie(species_df, names='Threat Level', 
-                title="Species Distribution by Threat Level",
-                color_discrete_map={
-                    'Critically Endangered': '#FF4444',
-                    'Endangered': '#FF8800',
-                    'Near Threatened': '#FFD700',
-                    'Least Concern': '#00C851'
-                })
-    st.plotly_chart(fig, use_container_width=True)
-    
-    # Growth form distribution
-    fig = px.histogram(species_df, x='Growth Form', 
-                      title="Species Distribution by Growth Form",
-                      color='Growth Form')
-    st.plotly_chart(fig, use_container_width=True)
-    
-    # Research resources
-    st.subheader("📚 Research Resources")
-    
-    resources = [
-        {"title": "Coral Species Identification Guide", "type": "PDF", "size": "15.2 MB"},
-        {"title": "Health Assessment Protocols", "type": "PDF", "size": "8.7 MB"},
-        {"title": "Monitoring Best Practices", "type": "PDF", "size": "12.3 MB"},
-        {"title": "Statistical Analysis Templates", "type": "R Script", "size": "2.1 MB"},
-        {"title": "Image Processing Workflows", "type": "Python", "size": "5.4 MB"}
-    ]
-    
-    for resource in resources:
-        with st.expander(f"📄 {resource['title']}"):
-            col1, col2 = st.columns([3, 1])
-            with col1:
-                st.write(f"Type: {resource['type']}")
-                st.write(f"Size: {resource['size']}")
-            with col2:
-                st.button(f"Download", key=f"download_{resource['title']}")
+        st.subheader("🔬 What This Tool Does")
+        st.write("""
+        This coral species identifier uses image analysis to help identify coral species from photographs. 
+        The tool analyzes visual characteristics such as growth patterns, polyp structure, and overall morphology 
+        to provide species predictions with confidence scores.
+        """)
+        
+        st.subheader("🌊 Coral Conservation")
+        st.write("""
+        Coral reefs are among the most biodiverse ecosystems on Earth, but they face significant threats from 
+        climate change, pollution, and human activities. Accurate species identification is crucial for:
+        
+        - Monitoring reef health and biodiversity
+        - Tracking population changes over time
+        - Guiding conservation efforts
+        - Supporting marine research initiatives
+        """)
+        
+        # Sample species showcase
+        st.subheader("🪸 Featured Species")
+        
+        for species_name, info in list(CORAL_SPECIES_DB.items())[:2]:
+            with st.expander(f"{info['common_name']} ({species_name})"):
+                col1, col2 = st.columns([1, 2])
+                with col1:
+                    status = info["conservation_status"]
+                    if status == "Critically Endangered":
+                        st.error(f"Status: {status}")
+                    elif status == "Near Threatened":
+                        st.warning(f"Status: {status}")
+                    else:
+                        st.success(f"Status: {status}")
+                
+                with col2:
+                    st.write(info["description"])
+                    st.write(f"**Habitat:** {info['habitat']}")
 
 if __name__ == "__main__":
     main()
