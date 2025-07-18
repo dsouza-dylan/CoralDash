@@ -1,0 +1,676 @@
+
+import React, { useState, useEffect, useMemo } from 'react';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, AreaChart, Area, BarChart, Bar } from 'recharts';
+import { AlertTriangle, Thermometer, TrendingUp, Waves, Info, Download, Calendar, MapPin, Heart, Users, Zap, Award, BookOpen, Bell } from 'lucide-react';
+
+// Mock data generator based on your CSV structure
+const generateMockData = () => {
+  const data = [];
+  const startDate = new Date('2021-06-07');
+  const endDate = new Date('2025-07-16');
+  
+  for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 7)) {
+    const dayOfYear = Math.floor((d - new Date(d.getFullYear(), 0, 0)) / (1000 * 60 * 60 * 24));
+    const seasonal = 2 * Math.sin((dayOfYear / 365) * 2 * Math.PI - Math.PI/2); // Seasonal cycle
+    const trend = 0.02 * ((d.getFullYear() - 2021) + (dayOfYear / 365)); // Warming trend
+    const noise = (Math.random() - 0.5) * 0.5;
+    
+    const baseTemp = 27.5 + seasonal + trend + noise;
+    const anomaly = Math.max(-2, Math.min(3, seasonal + trend + noise));
+    const dhw = Math.max(0, Math.min(20, (anomaly > 1 ? (anomaly - 1) * 2 : 0) + (Math.random() * 0.5)));
+    
+    data.push({
+      date: d.toISOString().split('T')[0],
+      timestamp: new Date(d),
+      temperature: Number(baseTemp.toFixed(2)),
+      anomaly: Number(anomaly.toFixed(2)),
+      dhw: Number(dhw.toFixed(2)),
+      bleachingRisk: dhw > 4 ? 'High' : dhw > 2 ? 'Medium' : 'Low',
+      healthScore: Math.max(20, Math.min(100, 100 - (dhw * 8) - (Math.max(0, anomaly - 1) * 15)))
+    });
+  }
+  
+  return data;
+};
+
+const CoralDash = () => {
+  const [activeTab, setActiveTab] = useState('overview');
+  const [selectedPeriod, setSelectedPeriod] = useState('all');
+  const [data] = useState(generateMockData());
+  const [isFollowing, setIsFollowing] = useState(false);
+  const [showAlert, setShowAlert] = useState(false);
+
+  // Process data based on selected period
+  const processedData = useMemo(() => {
+    let filteredData = [...data];
+    const now = new Date();
+    
+    if (selectedPeriod === '1year') {
+      const oneYearAgo = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
+      filteredData = data.filter(d => d.timestamp >= oneYearAgo);
+    } else if (selectedPeriod === '6months') {
+      const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 6, now.getDate());
+      filteredData = data.filter(d => d.timestamp >= sixMonthsAgo);
+    } else if (selectedPeriod === '3months') {
+      const threeMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 3, now.getDate());
+      filteredData = data.filter(d => d.timestamp >= threeMonthsAgo);
+    }
+    
+    return filteredData;
+  }, [data, selectedPeriod]);
+
+  const latest = data[data.length - 1];
+  const currentHealthScore = Math.round(latest.healthScore);
+  const isHighRisk = latest.dhw > 4;
+  
+  // Analytics
+  const analytics = useMemo(() => {
+    const recentData = data.slice(-52); // Last year of weekly data
+    const avgTemp = recentData.reduce((sum, d) => sum + d.temperature, 0) / recentData.length;
+    const maxDHW = Math.max(...recentData.map(d => d.dhw));
+    const bleachingDays = recentData.filter(d => d.dhw > 4).length;
+    const trendData = recentData.map((d, i) => ({ ...d, index: i }));
+    
+    return {
+      avgTemp: avgTemp.toFixed(2),
+      maxDHW: maxDHW.toFixed(2),
+      bleachingDays,
+      trendData,
+      riskLevel: latest.bleachingRisk,
+      recoveryTime: bleachingDays > 0 ? `${Math.max(4, 12 - bleachingDays)} weeks` : 'N/A'
+    };
+  }, [data, latest]);
+
+  useEffect(() => {
+    if (isHighRisk && !showAlert) {
+      setShowAlert(true);
+      setTimeout(() => setShowAlert(false), 5000);
+    }
+  }, [isHighRisk, showAlert]);
+
+  const HealthScoreGauge = ({ score }) => {
+    const getColor = (score) => {
+      if (score >= 80) return '#10b981';
+      if (score >= 60) return '#f59e0b';
+      if (score >= 40) return '#f97316';
+      return '#ef4444';
+    };
+    
+    const radius = 40;
+    const circumference = 2 * Math.PI * radius;
+    const strokeDasharray = circumference;
+    const strokeDashoffset = circumference - (score / 100) * circumference;
+    
+    return (
+      <div className="relative w-24 h-24 mx-auto">
+        <svg className="w-24 h-24 transform -rotate-90">
+          <circle
+            cx="48"
+            cy="48"
+            r={radius}
+            stroke="#e5e7eb"
+            strokeWidth="8"
+            fill="none"
+          />
+          <circle
+            cx="48"
+            cy="48"
+            r={radius}
+            stroke={getColor(score)}
+            strokeWidth="8"
+            fill="none"
+            strokeDasharray={strokeDasharray}
+            strokeDashoffset={strokeDashoffset}
+            className="transition-all duration-1000 ease-out"
+          />
+        </svg>
+        <div className="absolute inset-0 flex items-center justify-center">
+          <span className="text-lg font-bold" style={{ color: getColor(score) }}>
+            {score}
+          </span>
+        </div>
+      </div>
+    );
+  };
+
+  const ReefStoryNarrative = () => {
+    const getStoryBasedOnData = () => {
+      if (latest.dhw > 8) {
+        return {
+          title: "🚨 Critical Bleaching Event",
+          story: "This reef is experiencing severe thermal stress. The sustained high temperatures have triggered widespread coral bleaching. Marine life is under extreme pressure, and immediate monitoring is crucial.",
+          action: "Conservation teams are on alert. Recovery may take 5-10 years if conditions improve."
+        };
+      } else if (latest.dhw > 4) {
+        return {
+          title: "⚠️ Moderate Bleaching Risk",
+          story: "The reef is showing signs of thermal stress. Corals are beginning to expel their symbiotic algae, creating a 'bleaching' effect. This is nature's stress response to rising temperatures.",
+          action: "Close monitoring continues. Early intervention strategies may help minimize damage."
+        };
+      } else if (latest.anomaly > 1) {
+        return {
+          title: "🌡️ Elevated Temperatures",
+          story: "Sea surface temperatures are above normal, but the reef is showing resilience. The coral ecosystem is adapting, though continued warming could pose future challenges.",
+          action: "Preventive measures and monitoring remain important for long-term health."
+        };
+      } else {
+        return {
+          title: "🌊 Healthy Conditions",
+          story: "The reef is thriving! Temperatures are within normal ranges, and the coral ecosystem is maintaining its vibrant biodiversity. Fish populations are stable, and coral growth continues.",
+          action: "This is what we're working to preserve. Continued protection is essential."
+        };
+      }
+    };
+
+    const story = getStoryBasedOnData();
+    
+    return (
+      <div className="bg-gradient-to-br from-blue-50 to-cyan-50 p-6 rounded-lg border border-blue-200">
+        <h3 className="text-xl font-bold mb-4 text-blue-900">{story.title}</h3>
+        <p className="text-gray-700 mb-4 leading-relaxed">{story.story}</p>
+        <div className="bg-white p-4 rounded-lg border-l-4 border-blue-500">
+          <p className="text-sm text-blue-800 font-medium">{story.action}</p>
+        </div>
+      </div>
+    );
+  };
+
+  const tabContent = {
+    overview: (
+      <div className="space-y-6">
+        {/* Hero Section */}
+        <div className="bg-gradient-to-r from-blue-600 to-cyan-600 text-white p-6 rounded-lg">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-2xl font-bold mb-2">🏝️ Site 2886 - Coral Reef Monitoring</h2>
+              <p className="text-blue-100">Real-time thermal stress monitoring for coral conservation</p>
+            </div>
+            <div className="text-right">
+              <div className="text-sm text-blue-200">Latest Update</div>
+              <div className="text-xl font-bold">{latest.date}</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Alert Banner */}
+        {showAlert && isHighRisk && (
+          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg flex items-center">
+            <AlertTriangle className="w-5 h-5 mr-2" />
+            <span className="font-medium">High bleaching risk detected! DHW levels are critical.</span>
+          </div>
+        )}
+
+        {/* Key Metrics */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-500">Sea Surface Temp</p>
+                <p className="text-2xl font-bold text-blue-600">{latest.temperature}°C</p>
+              </div>
+              <Thermometer className="w-8 h-8 text-blue-500" />
+            </div>
+          </div>
+          
+          <div className="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-500">Temperature Anomaly</p>
+                <p className={`text-2xl font-bold ${latest.anomaly > 1 ? 'text-red-600' : 'text-green-600'}`}>
+                  {latest.anomaly > 0 ? '+' : ''}{latest.anomaly}°C
+                </p>
+              </div>
+              <TrendingUp className="w-8 h-8 text-orange-500" />
+            </div>
+          </div>
+          
+          <div className="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-500">Degree Heating Weeks</p>
+                <p className={`text-2xl font-bold ${latest.dhw > 4 ? 'text-red-600' : 'text-yellow-600'}`}>
+                  {latest.dhw}
+                </p>
+              </div>
+              <Waves className="w-8 h-8 text-red-500" />
+            </div>
+          </div>
+          
+          <div className="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
+            <div>
+              <p className="text-sm text-gray-500 mb-2">Reef Health Score</p>
+              <HealthScoreGauge score={currentHealthScore} />
+            </div>
+          </div>
+        </div>
+
+        {/* Reef Story */}
+        <ReefStoryNarrative />
+
+        {/* Main Chart */}
+        <div className="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold">Thermal Stress Timeline</h3>
+            <select 
+              value={selectedPeriod} 
+              onChange={(e) => setSelectedPeriod(e.target.value)}
+              className="px-3 py-2 border border-gray-300 rounded-md"
+            >
+              <option value="all">All Time</option>
+              <option value="1year">Last Year</option>
+              <option value="6months">Last 6 Months</option>
+              <option value="3months">Last 3 Months</option>
+            </select>
+          </div>
+          
+          <ResponsiveContainer width="100%" height={400}>
+            <LineChart data={processedData}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="date" />
+              <YAxis />
+              <Tooltip />
+              <Legend />
+              <Line type="monotone" dataKey="temperature" stroke="#2563eb" name="Temperature (°C)" />
+              <Line type="monotone" dataKey="anomaly" stroke="#dc2626" name="Anomaly (°C)" />
+              <Line type="monotone" dataKey="dhw" stroke="#7c2d12" name="DHW" />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+
+        {/* Community Features */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
+            <h3 className="text-lg font-semibold mb-4 flex items-center">
+              <Users className="w-5 h-5 mr-2 text-blue-500" />
+              Community Impact
+            </h3>
+            <div className="space-y-3">
+              <div className="flex justify-between">
+                <span className="text-gray-600">Active Followers</span>
+                <span className="font-semibold">2,847</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-600">Conservation Alerts Sent</span>
+                <span className="font-semibold">156</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-600">Research Papers Using Data</span>
+                <span className="font-semibold">23</span>
+              </div>
+            </div>
+          </div>
+          
+          <div className="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
+            <h3 className="text-lg font-semibold mb-4 flex items-center">
+              <Award className="w-5 h-5 mr-2 text-green-500" />
+              Your Impact
+            </h3>
+            <div className="space-y-3">
+              <button 
+                onClick={() => setIsFollowing(!isFollowing)}
+                className={`w-full py-2 px-4 rounded-lg transition-colors ${
+                  isFollowing 
+                    ? 'bg-green-100 text-green-700 border border-green-300' 
+                    : 'bg-blue-100 text-blue-700 border border-blue-300'
+                }`}
+              >
+                <Heart className={`w-4 h-4 inline mr-2 ${isFollowing ? 'fill-current' : ''}`} />
+                {isFollowing ? 'Following this reef' : 'Follow this reef'}
+              </button>
+              <div className="text-sm text-gray-600 text-center">
+                Join 2,847 others protecting this reef
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    ),
+    
+    analytics: (
+      <div className="space-y-6">
+        <h2 className="text-2xl font-bold mb-4">📊 Advanced Analytics</h2>
+        
+        {/* Risk Assessment */}
+        <div className="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
+          <h3 className="text-lg font-semibold mb-4">Bleaching Risk Assessment</h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="text-center">
+              <div className={`text-3xl font-bold mb-2 ${
+                analytics.riskLevel === 'High' ? 'text-red-600' : 
+                analytics.riskLevel === 'Medium' ? 'text-yellow-600' : 'text-green-600'
+              }`}>
+                {analytics.riskLevel}
+              </div>
+              <div className="text-sm text-gray-600">Current Risk Level</div>
+            </div>
+            <div className="text-center">
+              <div className="text-3xl font-bold text-blue-600 mb-2">{analytics.maxDHW}</div>
+              <div className="text-sm text-gray-600">Max DHW (12 months)</div>
+            </div>
+            <div className="text-center">
+              <div className="text-3xl font-bold text-purple-600 mb-2">{analytics.recoveryTime}</div>
+              <div className="text-sm text-gray-600">Est. Recovery Time</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Trend Analysis */}
+        <div className="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
+          <h3 className="text-lg font-semibold mb-4">Temperature Trend Analysis</h3>
+          <ResponsiveContainer width="100%" height={300}>
+            <AreaChart data={analytics.trendData}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="date" />
+              <YAxis />
+              <Tooltip />
+              <Area type="monotone" dataKey="temperature" stroke="#2563eb" fill="#3b82f6" fillOpacity={0.6} />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+
+        {/* Bleaching History */}
+        <div className="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
+          <h3 className="text-lg font-semibold mb-4">Bleaching Event History</h3>
+          <ResponsiveContainer width="100%" height={300}>
+            <BarChart data={processedData.filter(d => d.dhw > 2)}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="date" />
+              <YAxis />
+              <Tooltip />
+              <Bar dataKey="dhw" fill="#dc2626" />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+    ),
+    
+    education: (
+      <div className="space-y-6">
+        <h2 className="text-2xl font-bold mb-4">📚 Understanding Coral Bleaching</h2>
+        
+        {/* Educational Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="bg-gradient-to-br from-blue-50 to-cyan-50 p-6 rounded-lg border border-blue-200">
+            <h3 className="text-lg font-semibold mb-3 text-blue-900">🌡️ What is Thermal Stress?</h3>
+            <p className="text-gray-700 mb-4">
+              When ocean temperatures rise above normal levels, corals become stressed. Even a 1-2°C increase 
+              can trigger bleaching - the process where corals expel their colorful symbiotic algae.
+            </p>
+            <div className="bg-white p-3 rounded border-l-4 border-blue-500">
+              <strong>Current Status:</strong> {latest.temperature}°C ({latest.anomaly > 0 ? '+' : ''}{latest.anomaly}°C above normal)
+            </div>
+          </div>
+          
+          <div className="bg-gradient-to-br from-orange-50 to-red-50 p-6 rounded-lg border border-orange-200">
+            <h3 className="text-lg font-semibold mb-3 text-orange-900">🔥 Degree Heating Weeks (DHW)</h3>
+            <p className="text-gray-700 mb-4">
+              DHW measures cumulative thermal stress. Values above 4 typically cause bleaching, 
+              while values above 8 often result in coral mortality.
+            </p>
+            <div className="bg-white p-3 rounded border-l-4 border-orange-500">
+              <strong>Current DHW:</strong> {latest.dhw} ({latest.dhw > 4 ? 'Bleaching likely' : 'Normal range'})
+            </div>
+          </div>
+        </div>
+
+        {/* Interactive Learning */}
+        <div className="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
+          <h3 className="text-lg font-semibold mb-4">🎓 Interactive Learning: Coral Bleaching Stages</h3>
+          <div className="space-y-4">
+            <div className="flex items-start space-x-4">
+              <div className="w-8 h-8 bg-green-500 rounded-full flex items-center justify-center text-white font-bold">1</div>
+              <div>
+                <h4 className="font-semibold text-green-700">Healthy Coral (DHW: 0-2)</h4>
+                <p className="text-gray-600">Corals maintain their symbiotic relationship with zooxanthellae algae, displaying vibrant colors.</p>
+              </div>
+            </div>
+            <div className="flex items-start space-x-4">
+              <div className="w-8 h-8 bg-yellow-500 rounded-full flex items-center justify-center text-white font-bold">2</div>
+              <div>
+                <h4 className="font-semibold text-yellow-700">Early Stress (DHW: 2-4)</h4>
+                <p className="text-gray-600">Corals begin to show signs of stress but may still recover quickly if temperatures drop.</p>
+              </div>
+            </div>
+            <div className="flex items-start space-x-4">
+              <div className="w-8 h-8 bg-orange-500 rounded-full flex items-center justify-center text-white font-bold">3</div>
+              <div>
+                <h4 className="font-semibold text-orange-700">Bleaching Onset (DHW: 4-8)</h4>
+                <p className="text-gray-600">Corals expel their algae, turning white. Recovery is possible but depends on duration.</p>
+              </div>
+            </div>
+            <div className="flex items-start space-x-4">
+              <div className="w-8 h-8 bg-red-500 rounded-full flex items-center justify-center text-white font-bold">4</div>
+              <div>
+                <h4 className="font-semibold text-red-700">Severe Bleaching (DHW: 8+)</h4>
+                <p className="text-gray-600">Coral mortality becomes likely. Recovery may take years if conditions improve.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Climate Connection */}
+        <div className="bg-gradient-to-br from-purple-50 to-pink-50 p-6 rounded-lg border border-purple-200">
+          <h3 className="text-lg font-semibold mb-4 text-purple-900">🌍 The Climate Connection</h3>
+          <p className="text-gray-700 mb-4">
+            Coral bleaching events are becoming more frequent and severe due to climate change. 
+            Ocean temperatures have risen by approximately 1°C since the 1960s, and this trend is accelerating.
+          </p>
+          <div className="bg-white p-4 rounded-lg">
+            <h4 className="font-semibold mb-2">What You Can Do:</h4>
+            <ul className="text-sm text-gray-600 space-y-1">
+              <li>• Reduce carbon footprint through sustainable practices</li>
+              <li>• Support coral restoration and marine protection efforts</li>
+              <li>• Choose reef-safe sunscreen when swimming</li>
+              <li>• Advocate for climate action in your community</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    ),
+    
+    alerts: (
+      <div className="space-y-6">
+        <h2 className="text-2xl font-bold mb-4">🔔 Reef Health Alerts</h2>
+        
+        {/* Alert Settings */}
+        <div className="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
+          <h3 className="text-lg font-semibold mb-4">Alert Preferences</h3>
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h4 className="font-medium">Bleaching Risk Alerts</h4>
+                <p className="text-sm text-gray-600">Notify when DHW exceeds 4 (moderate bleaching risk)</p>
+              </div>
+              <input type="checkbox" className="w-5 h-5 text-blue-600" defaultChecked />
+            </div>
+            <div className="flex items-center justify-between">
+              <div>
+                <h4 className="font-medium">Critical Stress Alerts</h4>
+                <p className="text-sm text-gray-600">Notify when DHW exceeds 8 (severe bleaching risk)</p>
+              </div>
+              <input type="checkbox" className="w-5 h-5 text-blue-600" defaultChecked />
+            </div>
+            <div className="flex items-center justify-between">
+              <div>
+                <h4 className="font-medium">Recovery Updates</h4>
+                <p className="text-sm text-gray-600">Notify when conditions improve after bleaching events</p>
+              </div>
+              <input type="checkbox" className="w-5 h-5 text-blue-600" defaultChecked />
+            </div>
+          </div>
+        </div>
+
+        {/* Recent Alerts */}
+        <div className="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
+          <h3 className="text-lg font-semibold mb-4">Recent Alerts</h3>
+          <div className="space-y-3">
+            <div className="flex items-start space-x-3 p-3 bg-red-50 rounded-lg border border-red-200">
+              <AlertTriangle className="w-5 h-5 text-red-500 mt-0.5" />
+              <div>
+                <div className="font-medium text-red-900">High Bleaching Risk</div>
+                <div className="text-sm text-red-700">DHW reached 6.2 - moderate to severe bleaching expected</div>
+                <div className="text-xs text-red-600">2 days ago</div>
+              </div>
+            </div>
+            <div className="flex items-start space-x-3 p-3 bg-yellow-50 rounded-lg border border-yellow-200">
+              <Bell className="w-5 h-5 text-yellow-500 mt-0.5" />
+              <div>
+                <div className="font-medium text-yellow-900">Temperature Spike</div>
+                <div className="text-sm text-yellow-700">Sea surface temperature rose to 29.1°C (+1.8°C above normal)</div>
+                <div className="text-xs text-yellow-600">5 days ago</div>
+              </div>
+            </div>
+            <div className="flex items-start space-x-3 p-3 bg-blue-50 rounded-lg border border-blue-200">
+              <Info className="w-5 h-5 text-blue-500 mt-0.5" />
+              <div>
+                <div className="font-medium text-blue-900">Monitoring Update</div>
+                <div className="text-sm text-blue-700">New satellite data integrated - improved accuracy</div>
+                <div className="text-xs text-blue-600">1 week ago</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Community Alerts */}
+        <div className="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
+          <h3 className="text-lg font-semibold mb-4">Community Reports</h3>
+          <div className="space-y-3">
+            <div className="flex items-start space-x-3 p-3 bg-gray-50 rounded-lg">
+              <Users className="w-5 h-5 text-gray-500 mt-0.5" />
+              <div>
+                <div className="font-medium text-gray-900">Dive Report - Site 2886</div>
+                <div className="text-sm text-gray-700">"Observed 30% bleaching on shallow reef - staghorn corals most affected"</div>
+                <div className="text-xs text-gray-600">Reported by Marine Biologist Sarah Chen • 3 days ago</div>
+              </div>
+            </div>
+            <div className="flex items-start space-x-3 p-3 bg-gray-50 rounded-lg">
+              <Users className="w-5 h-5 text-gray-500 mt-0.5" />
+              <div>
+                <div className="font-medium text-gray-900">Tourist Observation</div>
+                <div className="text-sm text-gray-700">"White patches visible on coral formations during snorkeling tour"</div>
+                <div className="text-xs text-gray-600">Reported by Local Tour Guide • 1 week ago</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      {/* Header */}
+      <header className="bg-white shadow-sm border-b border-gray-200">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between items-center h-16">
+            <div className="flex items-center space-x-4">
+              <div className="text-2xl font-bold text-blue-600">🌊 CoralDash</div>
+              <div className="hidden md:flex items-center space-x-2 text-sm text-gray-600">
+                <MapPin className="w-4 h-4" />
+                <span>Site 2886 • Pacific Ocean</span>
+              </div>
+            </div>
+            <div className="flex items-center space-x-4">
+              <button className="flex items-center space-x-2 px-4 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors">
+                <Download className="w-4 h-4" />
+                <span>Export Data</span>
+              </button>
+              <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center text-white font-bold">
+                SC
+              </div>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      {/* Navigation Tabs */}
+      <nav className="bg-white border-b border-gray-200">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex space-x-8">
+            {[
+              { id: 'overview', label: 'Overview', icon: Waves },
+              { id: 'analytics', label: 'Analytics', icon: TrendingUp },
+              { id: 'education', label: 'Learn', icon: BookOpen },
+              { id: 'alerts', label: 'Alerts', icon: Bell }
+            ].map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                onClick={() => setActiveTab(id)}
+                className={`flex items-center space-x-2 py-4 px-2 border-b-2 transition-colors ${
+                  activeTab === id
+                    ? 'border-blue-500 text-blue-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                <Icon className="w-5 h-5" />
+                <span className="font-medium">{label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      </nav>
+
+      {/* Main Content */}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {tabContent[activeTab]}
+      </main>
+
+      {/* Footer */}
+      <footer className="bg-white border-t border-gray-200 mt-12">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
+            <div>
+              <h3 className="text-lg font-semibold mb-4 text-blue-600">🌊 CoralDash</h3>
+              <p className="text-gray-600 text-sm">
+                Real-time coral reef monitoring powered by open-source oceanographic data from Aqualink and NOAA.
+              </p>
+            </div>
+            <div>
+              <h4 className="font-semibold mb-3 text-gray-900">Data Sources</h4>
+              <ul className="text-sm text-gray-600 space-y-1">
+                <li>• Aqualink.org</li>
+                <li>• NOAA Coral Reef Watch</li>
+                <li>• Satellite Sea Surface Temperature</li>
+                <li>• Community Reports</li>
+              </ul>
+            </div>
+            <div>
+              <h4 className="font-semibold mb-3 text-gray-900">Get Involved</h4>
+              <ul className="text-sm text-gray-600 space-y-1">
+                <li>• Follow reef sites</li>
+                <li>• Submit observations</li>
+                <li>• Share with others</li>
+                <li>• Support conservation</li>
+              </ul>
+            </div>
+            <div>
+              <h4 className="font-semibold mb-3 text-gray-900">Resources</h4>
+              <ul className="text-sm text-gray-600 space-y-1">
+                <li>• API Documentation</li>
+                <li>• Research Papers</li>
+                <li>• Educational Materials</li>
+                <li>• Conservation Guide</li>
+              </ul>
+            </div>
+          </div>
+          <div className="border-t border-gray-200 mt-8 pt-4">
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-gray-500">
+                © 2025 CoralDash. Data updated every 6 hours. Last update: {latest.date}
+              </p>
+              <div className="flex items-center space-x-4">
+                <span className="text-sm text-gray-500">Powered by</span>
+                <div className="flex items-center space-x-2">
+                  <div className="w-6 h-6 bg-blue-500 rounded"></div>
+                  <span className="text-sm font-medium text-blue-600">Aqualink</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </footer>
+    </div>
+  );
+};
+
+export default CoralDash;
